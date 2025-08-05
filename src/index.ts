@@ -104,10 +104,15 @@ app.get('/api/items', async (c) => {
         SELECT compressed_path FROM photo_assets WHERE item_id = ? LIMIT 3
       `).bind(item.id).all();
       
+      // Convert file paths to public URLs
+      const photoUrls = photos.results?.map(p => {
+        return `/api/photos/serve/${p.compressed_path.replace('assets/', '')}`;
+      }) || [];
+      
       return {
         ...item,
         tags: JSON.parse(item.tags || '[]'),
-        photos: photos.results?.map(p => p.compressed_path) || []
+        photos: photoUrls
       };
     })
   );
@@ -133,12 +138,17 @@ app.get('/api/items/:id', async (c) => {
     SELECT compressed_path FROM photo_assets WHERE item_id = ?
   `).bind(id).all();
   
+  // Convert file paths to public URLs
+  const photoUrls = photos.results?.map(p => {
+    return `/api/photos/serve/${p.compressed_path.replace('assets/', '')}`;
+  }) || [];
+  
   return c.json({
     success: true,
     data: {
       ...item,
       tags: JSON.parse(item.tags || '[]'),
-      photos: photos.results?.map(p => p.compressed_path) || []
+      photos: photoUrls
     }
   });
 });

@@ -12,9 +12,16 @@ router.get('/item/:itemId', async (c) => {
     const db = new DatabaseQueries(c.env);
     const photos = await db.getPhotosByItemId(itemId);
     
+    // Convert to format expected by PhotoUploader with public URLs
+    const photosWithUrls = photos.map(photo => ({
+      id: photo.id,
+      url: `/api/photos/serve/${photo.compressedPath.replace('assets/', '')}`,
+      filename: photo.filename
+    }));
+    
     return c.json({
       success: true,
-      data: photos
+      data: photosWithUrls
     });
   } catch (error) {
     console.error('Get photos error:', error);
