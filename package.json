@@ -11,24 +11,30 @@
     "db:seed": "wrangler d1 execute collepto-db --file=./seed.sql",
     "types": "wrangler types"
   },
-  "keywords": ["cloudflare", "workers", "collection", "museum"],
+  "keywords": [
+    "cloudflare",
+    "workers",
+    "collection",
+    "museum"
+  ],
   "author": "Collector",
   "license": "MIT",
   "devDependencies": {
-    "@types/node": "^20.0.0",
     "@cloudflare/workers-types": "^4.20240109.0",
-    "typescript": "^5.0.0",
+    "@types/node": "^20.0.0",
     "esbuild": "^0.19.0",
+    "typescript": "^5.0.0",
     "wrangler": "^3.0.0"
   },
   "dependencies": {
     "@cloudflare/ai": "^1.0.0",
-    "hono": "^3.11.0",
-    "sharp": "^0.33.0",
-    "zod": "^3.22.0",
+    "@squoosh/lib": "^0.3.1",
+    "archiver": "^6.0.0",
     "bcryptjs": "^2.4.3",
-    "jsonwebtoken": "^9.0.0",
     "csv-writer": "^1.6.0",
-    "archiver": "^6.0.0"
+    "hono": "^3.11.0",
+    "jsonwebtoken": "^9.0.0",
+    "sharp": "^0.33.0",
+    "zod": "^3.22.0"
   }
 }

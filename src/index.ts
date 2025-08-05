@@ -191,7 +191,40 @@ app.route('/api/admin/blog', blogRouter);
 app.route('/api/admin/photos', photosRouter);
 app.route('/api/admin/export', exportRouter);
 
-// Serve dynamic assets from KV storage (uploaded images)
+// Serve photos from KV storage (public endpoint for compressed images)
+app.get('/api/photos/serve/*', async (c) => {
+  const url = new URL(c.req.url);
+  const photoPath = url.pathname.replace('/api/photos/serve/', '');
+  
+  try {
+    const key = `photo-storage/assets/${photoPath}`;
+    const storedData = await c.env.SESSIONS.get(key);
+    
+    if (!storedData) {
+      return c.notFound();
+    }
+    
+    const { data, mimeType, size, isCompressed } = JSON.parse(storedData);
+    
+    // Only serve compressed images through public endpoint
+    if (!isCompressed) {
+      return c.notFound();
+    }
+    
+    const buffer = Uint8Array.from(atob(data), c => c.charCodeAt(0));
+    
+    return c.body(buffer, 200, {
+      'Content-Type': mimeType,
+      'Cache-Control': 'public, max-age=31536000', // 1 year cache
+      'Content-Length': size.toString()
+    });
+  } catch (error) {
+    console.error('Photo serve error:', error);
+    return c.notFound();
+  }
+});
+
+// Serve dynamic assets from KV storage (uploaded images) - legacy endpoint
 app.get('/api/assets/*', async (c) => {
   const url = new URL(c.req.url);
   const assetPath = url.pathname.replace('/api/assets/', '');

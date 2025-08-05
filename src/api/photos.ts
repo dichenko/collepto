@@ -288,6 +288,72 @@ router.get('/storage/stats', async (c) => {
   }
 });
 
+// GET serve photo from storage
+router.get('/serve/*', async (c) => {
+  try {
+    const url = new URL(c.req.url);
+    const photoPath = url.pathname.replace('/api/admin/photos/serve/', '');
+    
+    // Try to get from KV storage
+    const key = `photo-storage/assets/${photoPath}`;
+    const storedData = await c.env.SESSIONS.get(key);
+    
+    if (!storedData) {
+      return c.notFound();
+    }
+    
+    const { data, mimeType, size } = JSON.parse(storedData);
+    const buffer = Uint8Array.from(atob(data), c => c.charCodeAt(0));
+    
+    return c.body(buffer, 200, {
+      'Content-Type': mimeType,
+      'Cache-Control': 'public, max-age=31536000', // 1 year cache
+      'Content-Length': size.toString()
+    });
+  } catch (error) {
+    console.error('Photo serve error:', error);
+    return c.notFound();
+  }
+});
+
+// GET photo by ID (returns metadata and URL)
+router.get('/:photoId', async (c) => {
+  try {
+    const photoId = c.req.param('photoId');
+    const db = new DatabaseQueries(c.env);
+    
+    // Get photo from database
+    const photo = await c.env.DB.prepare(`
+      SELECT * FROM photo_assets WHERE id = ?
+    `).bind(photoId).first();
+    
+    if (!photo) {
+      return c.json({ success: false, error: 'Photo not found' }, 404);
+    }
+    
+    // Generate public URL
+    const imageProcessor = new ImageProcessor(c.env);
+    const publicUrl = imageProcessor.getPublicUrl(photo.compressed_path);
+    
+    return c.json({
+      success: true,
+      data: {
+        id: photo.id,
+        itemId: photo.item_id,
+        filename: photo.filename,
+        size: photo.size,
+        publicUrl,
+        compressedPath: photo.compressed_path,
+        originalPath: photo.original_path,
+        createdAt: photo.created_at
+      }
+    });
+  } catch (error) {
+    console.error('Get photo error:', error);
+    return c.json({ success: false, error: 'Failed to get photo' }, 500);
+  }
+});
+
 // Utility function to format bytes
 function formatBytes(bytes: number): string {
   if (bytes === 0) return '0 Bytes';

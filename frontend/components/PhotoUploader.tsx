@@ -205,6 +205,22 @@ export function PhotoUploader({
     uploadFile(file);
   };
 
+  const handleDeletePhoto = async (photoId: string) => {
+    try {
+      setError(null);
+      const response = await apiClient.deletePhoto(photoId);
+      
+      if (response.success) {
+        // Call callback to refresh parent component
+        onPhotosUpdated?.();
+      } else {
+        setError(response.error || 'Ошибка удаления фото');
+      }
+    } catch (error) {
+      setError(error instanceof Error ? error.message : 'Ошибка удаления фото');
+    }
+  };
+
   return (
     <div className="space-y-4">
       {/* Upload Area */}
@@ -371,10 +387,7 @@ export function PhotoUploader({
                     variant="destructive"
                     size="sm"
                     className="opacity-0 group-hover:opacity-100 transition-opacity"
-                    onClick={() => {
-                      // TODO: Implement photo deletion
-                      console.log('Delete photo:', photo.id);
-                    }}
+                    onClick={() => handleDeletePhoto(photo.id)}
                   >
                     <X className="w-4 h-4" />
                   </Button>

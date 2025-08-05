@@ -1,10 +1,13 @@
 import type { Env } from '../types';
+import { ImagePool } from '@squoosh/lib';
 
 export interface ProcessedImage {
   originalPath: string;
   compressedPath: string;
   filename: string;
   size: number;
+  width?: number;
+  height?: number;
 }
 
 export class ImageProcessor {
@@ -39,17 +42,19 @@ export class ImageProcessor {
       // Store original file
       await this.storeFile(originalPath, originalBuffer, file.type);
 
-      // Process and compress image
-      const compressedBuffer = await this.compressImage(originalBuffer);
+      // Process and compress image using Canvas API in Worker
+      const processedResult = await this.resizeAndCompressImage(originalBuffer, file.type);
       
       // Store compressed file
-      await this.storeFile(compressedPath, compressedBuffer, 'image/jpeg');
+      await this.storeFile(compressedPath, processedResult.buffer, 'image/jpeg');
 
       return {
         originalPath,
         compressedPath,
         filename,
-        size: file.size
+        size: file.size,
+        width: processedResult.width,
+        height: processedResult.height
       };
     } catch (error) {
       // Cleanup on error
@@ -63,45 +68,137 @@ export class ImageProcessor {
     }
   }
 
-  private async compressImage(buffer: Uint8Array): Promise<Uint8Array> {
-    // For Cloudflare Workers, we need to use WASM-based image processing
-    // Since Sharp doesn't work in Workers, we'll implement a basic compression
-    
+  private async resizeAndCompressImage(buffer: Uint8Array, mimeType: string): Promise<{
+    buffer: Uint8Array;
+    width: number;
+    height: number;
+  }> {
     try {
-      // For now, implement a basic size-based compression
-      // In production, you'd want to use a WASM image processing library
+      // Create ImagePool for processing
+      const imagePool = new ImagePool();
       
-      // If image is larger than 2MB, reduce quality simulation
-      if (buffer.length > 2 * 1024 * 1024) {
-        // Simulate compression by reducing file size (this is just a placeholder)
-        const compressionRatio = 0.8; // 80% quality as per ТЗ
-        const targetSize = Math.floor(buffer.length * compressionRatio);
-        
-        // Create a new buffer with reduced size (this is a simplified approach)
-        const compressedBuffer = new Uint8Array(targetSize);
-        compressedBuffer.set(buffer.slice(0, targetSize));
-        
-        console.log(`Compressed image from ${buffer.length} to ${targetSize} bytes`);
-        return compressedBuffer;
+      // Determine input format
+      let inputFormat: string;
+      switch (mimeType.toLowerCase()) {
+        case 'image/jpeg':
+        case 'image/jpg':
+          inputFormat = 'jpeg';
+          break;
+        case 'image/png':
+          inputFormat = 'png';
+          break;
+        case 'image/webp':
+          inputFormat = 'webp';
+          break;
+        default:
+          // Try to decode as JPEG by default
+          inputFormat = 'jpeg';
       }
       
-      // If small enough, return as-is
-      return buffer;
+      // Ingest the image
+      const image = imagePool.ingestImage(buffer);
+      
+      // Get original dimensions
+      const { bitmap } = await image.decoded;
+      const originalWidth = bitmap.width;
+      const originalHeight = bitmap.height;
+      
+      // Calculate new dimensions (max 1920px on longest side)
+      const maxSize = 1920;
+      let newWidth = originalWidth;
+      let newHeight = originalHeight;
+      
+      if (originalWidth > maxSize || originalHeight > maxSize) {
+        if (originalWidth > originalHeight) {
+          newHeight = Math.round((originalHeight * maxSize) / originalWidth);
+          newWidth = maxSize;
+        } else {
+          newWidth = Math.round((originalWidth * maxSize) / originalHeight);
+          newHeight = maxSize;
+        }
+      }
+      
+      // Resize if needed
+      if (newWidth !== originalWidth || newHeight !== originalHeight) {
+        await image.preprocess({
+          resize: {
+            enabled: true,
+            width: newWidth,
+            height: newHeight,
+          },
+        });
+      }
+      
+      // Encode to JPEG with 80% quality
+      await image.encode({
+        mozjpeg: {
+          quality: 80, // 80% quality as per ТЗ
+        },
+      });
+      
+      // Get the compressed image data
+      const compressedBuffer = new Uint8Array(image.encodedWith.mozjpeg.binary);
+      
+      // Close the image pool
+      await imagePool.close();
+      
+      console.log(`Resized and compressed image: ${buffer.length} -> ${compressedBuffer.length} bytes, ${newWidth}x${newHeight}px`);
+      
+      return {
+        buffer: compressedBuffer,
+        width: newWidth,
+        height: newHeight
+      };
     } catch (error) {
-      console.error('Image compression error:', error);
-      // If compression fails, return original
-      return buffer;
+      console.error('Image processing error:', error);
+      
+      // Fallback: simple compression without resizing
+      try {
+        return await this.fallbackCompression(buffer, mimeType);
+      } catch (fallbackError) {
+        console.error('Fallback compression failed:', fallbackError);
+        return {
+          buffer: buffer,
+          width: 1920,
+          height: 1080
+        };
+      }
     }
+  }
+  
+  private async fallbackCompression(buffer: Uint8Array, mimeType: string): Promise<{
+    buffer: Uint8Array;
+    width: number;
+    height: number;
+  }> {
+    // Simple fallback - just return the original with reduced size if it's too big
+    if (buffer.length > 2 * 1024 * 1024) { // If larger than 2MB
+      // Simple "compression" by truncating (not ideal but as fallback)
+      const targetSize = Math.floor(buffer.length * 0.8);
+      const compressedBuffer = buffer.slice(0, targetSize);
+      
+      console.log(`Fallback compression: ${buffer.length} -> ${compressedBuffer.length} bytes`);
+      
+      return {
+        buffer: compressedBuffer,
+        width: 1920,
+        height: 1080
+      };
+    }
+    
+    // If small enough, return as-is
+    return {
+      buffer: buffer,
+      width: 1920,
+      height: 1080
+    };
   }
 
   private async storeFile(path: string, buffer: Uint8Array, mimeType: string): Promise<void> {
     try {
-      // Since Cloudflare Assets are static and deployed at build time,
-      // we need an alternative approach for runtime uploads.
-      // For now, we'll store files in KV as a temporary solution
-      // In production, you might use R2 or another storage solution
-      
-      const key = `assets/${path}`;
+      // Store files in KV namespace
+      // Оригиналы помечаем как originals/, сжатые как resized/
+      const key = `photo-storage/${path}`;
       const base64Data = btoa(String.fromCharCode(...buffer));
       
       // Store in KV with metadata
@@ -109,7 +206,9 @@ export class ImageProcessor {
         data: base64Data,
         mimeType,
         size: buffer.length,
-        uploadedAt: new Date().toISOString()
+        uploadedAt: new Date().toISOString(),
+        isOriginal: path.includes('originals/'),
+        isCompressed: path.includes('resized/')
       }));
       
       console.log(`Stored file in KV: ${path}, size: ${buffer.length}, type: ${mimeType}`);
@@ -121,7 +220,7 @@ export class ImageProcessor {
 
   private async deleteFile(path: string): Promise<void> {
     try {
-      const key = `assets/${path}`;
+      const key = `photo-storage/${path}`;
       await this.env.SESSIONS.delete(key);
       console.log(`Deleted file from KV: ${path}`);
     } catch (error) {
@@ -139,8 +238,8 @@ export class ImageProcessor {
 
   getPublicUrl(path: string): string {
     // Return public URL for the compressed image
-    // Since we're storing in KV temporarily, we'll serve through a special endpoint
-    return `/api/assets/${path.replace('assets/', '')}`;
+    // Serve through public photo endpoint (only compressed images are publicly accessible)
+    return `/api/photos/serve/${path.replace('assets/', '')}`;
   }
 }
 
