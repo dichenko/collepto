@@ -1,5 +1,4 @@
 import type { Env } from '../types';
-import { ImagePool } from '@squoosh/lib';
 
 export interface ProcessedImage {
   originalPath: string;
@@ -74,34 +73,14 @@ export class ImageProcessor {
     height: number;
   }> {
     try {
-      // Create ImagePool for processing
-      const imagePool = new ImagePool();
+      // Create blob from the buffer
+      const blob = new Blob([buffer], { type: mimeType });
       
-      // Determine input format
-      let inputFormat: string;
-      switch (mimeType.toLowerCase()) {
-        case 'image/jpeg':
-        case 'image/jpg':
-          inputFormat = 'jpeg';
-          break;
-        case 'image/png':
-          inputFormat = 'png';
-          break;
-        case 'image/webp':
-          inputFormat = 'webp';
-          break;
-        default:
-          // Try to decode as JPEG by default
-          inputFormat = 'jpeg';
-      }
+      // Create ImageBitmap from blob (supported in Workers)
+      const imageBitmap = await createImageBitmap(blob);
       
-      // Ingest the image
-      const image = imagePool.ingestImage(buffer);
-      
-      // Get original dimensions
-      const { bitmap } = await image.decoded;
-      const originalWidth = bitmap.width;
-      const originalHeight = bitmap.height;
+      const originalWidth = imageBitmap.width;
+      const originalHeight = imageBitmap.height;
       
       // Calculate new dimensions (max 1920px on longest side)
       const maxSize = 1920;
@@ -118,29 +97,28 @@ export class ImageProcessor {
         }
       }
       
-      // Resize if needed
-      if (newWidth !== originalWidth || newHeight !== originalHeight) {
-        await image.preprocess({
-          resize: {
-            enabled: true,
-            width: newWidth,
-            height: newHeight,
-          },
-        });
+      // Create OffscreenCanvas for processing
+      const canvas = new OffscreenCanvas(newWidth, newHeight);
+      const ctx = canvas.getContext('2d');
+      
+      if (!ctx) {
+        throw new Error('Cannot create canvas context');
       }
       
-      // Encode to JPEG with 80% quality
-      await image.encode({
-        mozjpeg: {
-          quality: 80, // 80% quality as per ТЗ
-        },
+      // Draw the resized image
+      ctx.drawImage(imageBitmap, 0, 0, newWidth, newHeight);
+      
+      // Convert to JPEG with 80% quality
+      const compressedBlob = await canvas.convertToBlob({
+        type: 'image/jpeg',
+        quality: 0.8 // 80% quality as per ТЗ
       });
       
-      // Get the compressed image data
-      const compressedBuffer = new Uint8Array(image.encodedWith.mozjpeg.binary);
+      // Convert blob back to buffer
+      const compressedBuffer = new Uint8Array(await compressedBlob.arrayBuffer());
       
-      // Close the image pool
-      await imagePool.close();
+      // Close the ImageBitmap to free memory
+      imageBitmap.close();
       
       console.log(`Resized and compressed image: ${buffer.length} -> ${compressedBuffer.length} bytes, ${newWidth}x${newHeight}px`);
       
@@ -171,25 +149,45 @@ export class ImageProcessor {
     width: number;
     height: number;
   }> {
-    // Simple fallback - just return the original with reduced size if it's too big
-    if (buffer.length > 2 * 1024 * 1024) { // If larger than 2MB
-      // Simple "compression" by truncating (not ideal but as fallback)
-      const targetSize = Math.floor(buffer.length * 0.8);
-      const compressedBuffer = buffer.slice(0, targetSize);
+    try {
+      // Try basic Canvas compression without resizing
+      const blob = new Blob([buffer], { type: mimeType });
+      const imageBitmap = await createImageBitmap(blob);
       
-      console.log(`Fallback compression: ${buffer.length} -> ${compressedBuffer.length} bytes`);
+      const width = imageBitmap.width;
+      const height = imageBitmap.height;
       
-      return {
-        buffer: compressedBuffer,
-        width: 1920,
-        height: 1080
-      };
+      const canvas = new OffscreenCanvas(width, height);
+      const ctx = canvas.getContext('2d');
+      
+      if (ctx) {
+        ctx.drawImage(imageBitmap, 0, 0);
+        
+        const compressedBlob = await canvas.convertToBlob({
+          type: 'image/jpeg',
+          quality: 0.8
+        });
+        
+        const compressedBuffer = new Uint8Array(await compressedBlob.arrayBuffer());
+        imageBitmap.close();
+        
+        console.log(`Fallback Canvas compression: ${buffer.length} -> ${compressedBuffer.length} bytes`);
+        
+        return {
+          buffer: compressedBuffer,
+          width,
+          height
+        };
+      }
+    } catch (error) {
+      console.error('Canvas fallback failed:', error);
     }
     
-    // If small enough, return as-is
+    // Ultimate fallback - just return original if everything fails
+    console.log(`No compression applied, returning original: ${buffer.length} bytes`);
     return {
       buffer: buffer,
-      width: 1920,
+      width: 1920, // Estimated dimensions
       height: 1080
     };
   }

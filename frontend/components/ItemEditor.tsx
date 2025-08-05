@@ -49,6 +49,7 @@ export function ItemEditor({ itemId, onSave, onCancel }: ItemEditorProps) {
   const [isSaving, setIsSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [validationErrors, setValidationErrors] = useState<{ [key: string]: string }>({});
+  const [isNewlyCreated, setIsNewlyCreated] = useState(false);
 
   // Load existing item if editing
   useEffect(() => {
@@ -114,26 +115,30 @@ export function ItemEditor({ itemId, onSave, onCancel }: ItemEditorProps) {
       if (itemId) {
         // Update existing item
         response = await apiClient.updateItem(itemId, item);
-      } else {
-        // Create new item
-        response = await apiClient.createItem(item as Omit<CollectorItem, 'id' | 'createdAt' | 'updatedAt' | 'photos'>);
-      }
-
-      if (response.success) {
-        // Reload item data to get updated info
-        if (itemId) {
+        
+        if (response.success) {
+          // Reload item data to get updated info
           const updatedResponse = await apiClient.getItem(itemId);
           if (updatedResponse.success && updatedResponse.data) {
             onSave(updatedResponse.data);
           }
-        } else if (response.data?.id) {
-          // For new items, load the created item
-          const newResponse = await apiClient.getItem(response.data.id);
-          if (newResponse.success && newResponse.data) {
-            onSave(newResponse.data);
-          }
         }
       } else {
+        // Create new item
+        response = await apiClient.createItem(item as Omit<CollectorItem, 'id' | 'createdAt' | 'updatedAt' | 'photos'>);
+        
+        if (response.success && response.data?.id) {
+          // For new items, stay in editor with the new ID for photo upload
+          const newResponse = await apiClient.getItem(response.data.id);
+          if (newResponse.success && newResponse.data) {
+            setItem(newResponse.data);
+            setIsNewlyCreated(true);
+            // Don't call onSave yet - keep the user in edit mode for photo upload
+          }
+        }
+      }
+      
+      if (!response.success) {
         setError(response.error || 'Ошибка сохранения');
       }
     } catch (error) {
@@ -174,6 +179,13 @@ export function ItemEditor({ itemId, onSave, onCancel }: ItemEditorProps) {
     }
   };
 
+  const handleFinish = () => {
+    // For newly created items, call onSave to return to collection
+    if (item.id) {
+      onSave(item as CollectorItem);
+    }
+  };
+
   if (isLoading) {
     return (
       <div className="p-8 text-center">
@@ -192,17 +204,41 @@ export function ItemEditor({ itemId, onSave, onCancel }: ItemEditorProps) {
             Назад
           </Button>
           <h1 className="text-2xl font-semibold">
-            {itemId ? 'Редактировать предмет' : 'Новый предмет'}
+            {item.id && !itemId ? 'Новый предмет создан' : 
+             itemId ? 'Редактировать предмет' : 'Новый предмет'}
           </h1>
         </div>
         
-        <Button onClick={handleSave} disabled={isSaving} className="gap-2">
-          <Save className="w-4 h-4" />
-          {isSaving ? 'Сохранение...' : 'Сохранить'}
-        </Button>
+        <div className="flex gap-2">
+          {isNewlyCreated ? (
+            <>
+              <Button onClick={handleSave} disabled={isSaving} variant="outline" className="gap-2">
+                <Save className="w-4 h-4" />
+                {isSaving ? 'Сохранение...' : 'Сохранить изменения'}
+              </Button>
+              <Button onClick={handleFinish} className="gap-2">
+                Завершить
+              </Button>
+            </>
+          ) : (
+            <Button onClick={handleSave} disabled={isSaving} className="gap-2">
+              <Save className="w-4 h-4" />
+              {isSaving ? 'Сохранение...' : 'Сохранить'}
+            </Button>
+          )}
+        </div>
       </div>
 
-      {/* Error Display */}
+      {/* Success/Error Display */}
+      {isNewlyCreated && (
+        <Alert className="border-green-200 bg-green-50">
+          <AlertCircle className="h-4 w-4 text-green-600" />
+          <AlertDescription className="text-green-800">
+            Предмет успешно создан! Теперь вы можете загрузить фотографии и внести дополнительные изменения.
+          </AlertDescription>
+        </Alert>
+      )}
+      
       {error && (
         <Alert variant="destructive">
           <AlertCircle className="h-4 w-4" />
@@ -441,7 +477,7 @@ export function ItemEditor({ itemId, onSave, onCancel }: ItemEditorProps) {
       </Card>
 
       {/* Photo Management */}
-      {itemId && (
+      {(itemId || item.id) && (
         <>
           <Separator />
           <Card>
@@ -450,7 +486,7 @@ export function ItemEditor({ itemId, onSave, onCancel }: ItemEditorProps) {
             </CardHeader>
             <CardContent>
               <PhotoUploader
-                itemId={itemId}
+                itemId={itemId || item.id!}
                 existingPhotos={item.photos?.map((url, index) => ({
                   id: `photo-${index}`,
                   url,
@@ -458,7 +494,22 @@ export function ItemEditor({ itemId, onSave, onCancel }: ItemEditorProps) {
                 })) || []}
                 onPhotosUpdated={() => {
                   // Reload item to get updated photos
-                  loadItem();
+                  if (itemId) {
+                    loadItem();
+                  } else if (item.id) {
+                    // For newly created items, fetch updated data
+                    const loadNewItem = async () => {
+                      try {
+                        const response = await apiClient.getItem(item.id!);
+                        if (response.success && response.data) {
+                          setItem(response.data);
+                        }
+                      } catch (error) {
+                        console.error('Failed to reload item:', error);
+                      }
+                    };
+                    loadNewItem();
+                  }
                 }}
               />
             </CardContent>
@@ -466,13 +517,16 @@ export function ItemEditor({ itemId, onSave, onCancel }: ItemEditorProps) {
         </>
       )}
 
-      {!itemId && (
-        <Alert>
-          <AlertCircle className="h-4 w-4" />
-          <AlertDescription>
-            Загрузка фотографий будет доступна после сохранения предмета.
-          </AlertDescription>
-        </Alert>
+      {!itemId && !item.id && (
+        <>
+          <Separator />
+          <Alert>
+            <AlertCircle className="h-4 w-4" />
+            <AlertDescription>
+              Загрузка фотографий будет доступна после сохранения предмета.
+            </AlertDescription>
+          </Alert>
+        </>
       )}
     </div>
   );
