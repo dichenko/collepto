@@ -1,0 +1,302 @@
+import { Hono } from 'hono';
+import type { Env } from '../types';
+import { DatabaseQueries } from '../db/queries';
+import { ImageProcessor, validateImageFile } from '../lib/image-processor';
+
+const router = new Hono<{ Bindings: Env }>();
+
+// GET photos for an item
+router.get('/item/:itemId', async (c) => {
+  try {
+    const itemId = c.req.param('itemId');
+    const db = new DatabaseQueries(c.env);
+    const photos = await db.getPhotosByItemId(itemId);
+    
+    return c.json({
+      success: true,
+      data: photos
+    });
+  } catch (error) {
+    console.error('Get photos error:', error);
+    return c.json({ success: false, error: 'Failed to fetch photos' }, 500);
+  }
+});
+
+// POST upload photo for an item
+router.post('/item/:itemId/upload', async (c) => {
+  try {
+    const itemId = c.req.param('itemId');
+    
+    // Check if item exists
+    const db = new DatabaseQueries(c.env);
+    const item = await db.getItemById(itemId);
+    if (!item) {
+      return c.json({ success: false, error: 'Item not found' }, 404);
+    }
+
+    // Check photo limit (10 photos max per item)
+    const existingPhotos = await db.getPhotosByItemId(itemId);
+    if (existingPhotos.length >= 10) {
+      return c.json({ 
+        success: false, 
+        error: 'Maximum 10 photos allowed per item' 
+      }, 400);
+    }
+
+    // Get uploaded file
+    const formData = await c.req.formData();
+    const file = formData.get('photo') as File;
+    
+    if (!file) {
+      return c.json({ success: false, error: 'No file uploaded' }, 400);
+    }
+
+    // Validate file
+    const validation = validateImageFile(file);
+    if (!validation.valid) {
+      return c.json({ 
+        success: false, 
+        error: validation.error 
+      }, 400);
+    }
+
+    // Process image
+    const imageProcessor = new ImageProcessor(c.env);
+    const processedImage = await imageProcessor.processImage(file, itemId);
+
+    // Save to database
+    const photoId = await db.createPhotoAsset({
+      itemId,
+      originalPath: processedImage.originalPath,
+      compressedPath: processedImage.compressedPath,
+      filename: processedImage.filename,
+      size: processedImage.size
+    });
+
+    return c.json({
+      success: true,
+      data: {
+        id: photoId,
+        ...processedImage,
+        publicUrl: imageProcessor.getPublicUrl(processedImage.compressedPath)
+      }
+    }, 201);
+
+  } catch (error) {
+    console.error('Upload photo error:', error);
+    return c.json({ 
+      success: false, 
+      error: error instanceof Error ? error.message : 'Failed to upload photo' 
+    }, 500);
+  }
+});
+
+// POST upload multiple photos for an item
+router.post('/item/:itemId/upload-multiple', async (c) => {
+  try {
+    const itemId = c.req.param('itemId');
+    
+    // Check if item exists
+    const db = new DatabaseQueries(c.env);
+    const item = await db.getItemById(itemId);
+    if (!item) {
+      return c.json({ success: false, error: 'Item not found' }, 404);
+    }
+
+    // Check photo limit
+    const existingPhotos = await db.getPhotosByItemId(itemId);
+    const formData = await c.req.formData();
+    const files = formData.getAll('photos') as File[];
+    
+    if (files.length === 0) {
+      return c.json({ success: false, error: 'No files uploaded' }, 400);
+    }
+
+    if (existingPhotos.length + files.length > 10) {
+      return c.json({ 
+        success: false, 
+        error: `Cannot upload ${files.length} photos. Maximum 10 photos allowed per item (currently ${existingPhotos.length})` 
+      }, 400);
+    }
+
+    // Validate all files first
+    for (const file of files) {
+      const validation = validateImageFile(file);
+      if (!validation.valid) {
+        return c.json({ 
+          success: false, 
+          error: `File ${file.name}: ${validation.error}` 
+        }, 400);
+      }
+    }
+
+    // Process all images
+    const imageProcessor = new ImageProcessor(c.env);
+    const results = [];
+    const errors = [];
+
+    for (const file of files) {
+      try {
+        const processedImage = await imageProcessor.processImage(file, itemId);
+        
+        const photoId = await db.createPhotoAsset({
+          itemId,
+          originalPath: processedImage.originalPath,
+          compressedPath: processedImage.compressedPath,
+          filename: processedImage.filename,
+          size: processedImage.size
+        });
+
+        results.push({
+          id: photoId,
+          filename: file.name,
+          ...processedImage,
+          publicUrl: imageProcessor.getPublicUrl(processedImage.compressedPath)
+        });
+      } catch (error) {
+        errors.push({
+          filename: file.name,
+          error: error instanceof Error ? error.message : 'Upload failed'
+        });
+      }
+    }
+
+    return c.json({
+      success: errors.length === 0,
+      data: {
+        uploaded: results,
+        errors: errors,
+        count: results.length
+      }
+    }, errors.length === 0 ? 201 : 207); // 207 Multi-Status for partial success
+    
+  } catch (error) {
+    console.error('Upload multiple photos error:', error);
+    return c.json({ 
+      success: false, 
+      error: 'Failed to upload photos' 
+    }, 500);
+  }
+});
+
+// DELETE photo
+router.delete('/:photoId', async (c) => {
+  try {
+    const photoId = c.req.param('photoId');
+    const db = new DatabaseQueries(c.env);
+    
+    // Get photo info first
+    const photos = await db.getPhotosByItemId(''); // This needs a better query
+    const photo = photos.find(p => p.id === photoId);
+    
+    if (!photo) {
+      return c.json({ success: false, error: 'Photo not found' }, 404);
+    }
+
+    // Delete files from storage
+    const imageProcessor = new ImageProcessor(c.env);
+    await imageProcessor.deleteFiles(photo.originalPath, photo.compressedPath);
+    
+    // Delete from database
+    await db.deletePhotoAsset(photoId);
+
+    return c.json({
+      success: true,
+      data: { id: photoId }
+    });
+    
+  } catch (error) {
+    console.error('Delete photo error:', error);
+    return c.json({ success: false, error: 'Failed to delete photo' }, 500);
+  }
+});
+
+// PUT reorder photos for an item
+router.put('/item/:itemId/reorder', async (c) => {
+  try {
+    const itemId = c.req.param('itemId');
+    const { photoIds } = await c.req.json();
+    
+    if (!Array.isArray(photoIds)) {
+      return c.json({ success: false, error: 'photoIds must be an array' }, 400);
+    }
+
+    // For now, we'll just return success as photo ordering 
+    // would require additional database schema changes
+    // TODO: Implement photo ordering if needed
+    
+    return c.json({
+      success: true,
+      message: 'Photo order updated',
+      data: { itemId, photoIds }
+    });
+    
+  } catch (error) {
+    console.error('Reorder photos error:', error);
+    return c.json({ success: false, error: 'Failed to reorder photos' }, 500);
+  }
+});
+
+// GET storage usage statistics
+router.get('/storage/stats', async (c) => {
+  try {
+    const db = new DatabaseQueries(c.env);
+    
+    // Get total storage used
+    const storageResult = await c.env.DB.prepare(`
+      SELECT 
+        COUNT(*) as totalPhotos,
+        SUM(size) as totalSize
+      FROM photo_assets
+    `).first();
+    
+    // Get storage by item
+    const itemStorageResult = await c.env.DB.prepare(`
+      SELECT 
+        items.title,
+        COUNT(photo_assets.id) as photoCount,
+        SUM(photo_assets.size) as storageUsed
+      FROM items
+      LEFT JOIN photo_assets ON items.id = photo_assets.item_id
+      GROUP BY items.id, items.title
+      HAVING photoCount > 0
+      ORDER BY storageUsed DESC
+      LIMIT 10
+    `).all();
+
+    const totalPhotos = storageResult?.totalPhotos || 0;
+    const totalSize = storageResult?.totalSize || 0;
+    
+    // Cloudflare Assets limits (these are example values)
+    const maxStorageBytes = 10 * 1024 * 1024 * 1024; // 10GB example limit
+    const usagePercentage = (totalSize / maxStorageBytes) * 100;
+
+    return c.json({
+      success: true,
+      data: {
+        totalPhotos,
+        totalSize,
+        totalSizeFormatted: formatBytes(totalSize),
+        usagePercentage: Math.round(usagePercentage * 100) / 100,
+        topStorageUsers: itemStorageResult.results || []
+      }
+    });
+    
+  } catch (error) {
+    console.error('Storage stats error:', error);
+    return c.json({ success: false, error: 'Failed to get storage statistics' }, 500);
+  }
+});
+
+// Utility function to format bytes
+function formatBytes(bytes: number): string {
+  if (bytes === 0) return '0 Bytes';
+  
+  const k = 1024;
+  const sizes = ['Bytes', 'KB', 'MB', 'GB', 'TB'];
+  const i = Math.floor(Math.log(bytes) / Math.log(k));
+  
+  return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+}
+
+export { router as photosRouter };

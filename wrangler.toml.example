@@ -1,0 +1,35 @@
+name = "collepto"
+main = "src/index.ts"
+compatibility_date = "2024-01-01"
+compatibility_flags = ["nodejs_compat"]
+
+# Environment variables
+[vars]
+ADMIN_USERNAME = "admin"
+ADMIN_PASSWORD = "your_secure_password_here"
+JWT_SECRET = "your_jwt_secret_here_change_this"
+
+# D1 Database
+[[d1_databases]]
+binding = "DB"
+database_name = "collepto-db"
+database_id = "3d6b46f5-11a1-469b-ab9a-9b40e84ae3f0"
+
+# KV for sessions
+[[kv_namespaces]]
+binding = "SESSIONS"
+id = "d06ad3cbaa3242de81877bd58df5ccf7"
+
+# Static Assets for photos
+[assets]
+directory = "assets"
+binding = "ASSETS"
+
+[build]
+command = "npm run build"
+
+[env.development]
+vars = { ENVIRONMENT = "development" }
+
+[env.production]
+vars = { ENVIRONMENT = "production" }
