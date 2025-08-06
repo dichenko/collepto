@@ -1,6 +1,5 @@
 export interface Env {
   DB: D1Database;
-  ASSETS: Fetcher;
   SESSIONS: KVNamespace;
   PHOTOS_BUCKET: R2Bucket;
   ADMIN_USERNAME: string;

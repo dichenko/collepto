@@ -17,28 +17,18 @@ router.get('/item/:itemId', async (c) => {
     // Convert to format expected by PhotoUploader with public URLs
     const r2Processor = new R2ImageProcessor(c.env.PHOTOS_BUCKET);
     const photosWithUrls = photos.map(photo => {
-      // Check if this is an R2 photo or legacy KV photo
-      if (photo.thumbnailPath) {
-        // New R2 photo - use R2 URLs
-        const imageUrls = r2Processor.getImageUrls(
-          photo.originalPath, 
-          photo.compressedPath, 
-          photo.thumbnailPath
-        );
-        return {
-          id: photo.id,
-          url: imageUrls.compressedUrl,
-          thumbnailUrl: imageUrls.thumbnailUrl,
-          filename: photo.filename
-        };
-      } else {
-        // Legacy KV photo - use old URL format
-        return {
-          id: photo.id,
-          url: `/api/photos/serve/${photo.compressedPath.replace('assets/', '')}`,
-          filename: photo.filename
-        };
-      }
+      // All photos are now in R2
+      const imageUrls = r2Processor.getImageUrls(
+        photo.originalPath, 
+        photo.compressedPath, 
+        photo.thumbnailPath
+      );
+      return {
+        id: photo.id,
+        url: imageUrls.compressedUrl,
+        thumbnailUrl: imageUrls.thumbnailUrl,
+        filename: photo.filename
+      };
     });
     
     return c.json({
@@ -333,21 +323,13 @@ router.delete('/:photoId', async (c) => {
       return c.json({ success: false, error: 'Photo not found' }, 404);
     }
 
-    // Delete files from storage
-    if (photo.thumbnailPath) {
-      // R2 photo - delete all variants from R2
-      const r2Processor = new R2ImageProcessor(c.env.PHOTOS_BUCKET);
-      await r2Processor.deleteFiles({
-        original: photo.originalPath,
-        compressed: photo.compressedPath,
-        thumbnail: photo.thumbnailPath
-      });
-    } else {
-      // Legacy KV photo - use old deletion method
-      const { ImageProcessor } = await import('../lib/image-processor');
-      const imageProcessor = new ImageProcessor(c.env);
-      await imageProcessor.deleteFiles(photo.originalPath, photo.compressedPath);
-    }
+    // Delete files from R2 storage
+    const r2Processor = new R2ImageProcessor(c.env.PHOTOS_BUCKET);
+    await r2Processor.deleteFiles({
+      original: photo.originalPath,
+      compressed: photo.compressedPath,
+      thumbnail: photo.thumbnailPath
+    });
     
     // Delete from database
     await db.deletePhotoAsset(photoId);
@@ -532,25 +514,16 @@ router.get('/:photoId', async (c) => {
       return c.json({ success: false, error: 'Photo not found' }, 404);
     }
     
-    // Generate public URL based on photo type
-    let publicUrl, thumbnailUrl, originalUrl;
-    if (photo.thumbnail_path) {
-      // R2 photo - use R2 URLs
-      const r2Processor = new R2ImageProcessor(c.env.PHOTOS_BUCKET);
-      const imageUrls = r2Processor.getImageUrls(
-        photo.original_path,
-        photo.compressed_path,
-        photo.thumbnail_path
-      );
-      publicUrl = imageUrls.compressedUrl;
-      thumbnailUrl = imageUrls.thumbnailUrl;
-      originalUrl = imageUrls.originalUrl;
-    } else {
-      // Legacy KV photo - use old URL format
-      const { ImageProcessor } = await import('../lib/image-processor');
-      const imageProcessor = new ImageProcessor(c.env);
-      publicUrl = imageProcessor.getPublicUrl(photo.compressed_path);
-    }
+    // Generate R2 URLs for all photos
+    const r2Processor = new R2ImageProcessor(c.env.PHOTOS_BUCKET);
+    const imageUrls = r2Processor.getImageUrls(
+      photo.original_path,
+      photo.compressed_path,
+      photo.thumbnail_path
+    );
+    const publicUrl = imageUrls.compressedUrl;
+    const thumbnailUrl = imageUrls.thumbnailUrl;
+    const originalUrl = imageUrls.originalUrl;
     
     return c.json({
       success: true,

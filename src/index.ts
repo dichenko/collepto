@@ -107,15 +107,9 @@ app.get('/api/items', async (c) => {
         SELECT compressed_path, thumbnail_path FROM photo_assets WHERE item_id = ? LIMIT 3
       `).bind(item.id).all();
       
-      // Convert file paths to public URLs
+      // Convert file paths to public URLs - all photos are now in R2
       const photoUrls = photos.results?.map(p => {
-        // For R2 photos, use R2 URL format
-        if (p.thumbnail_path) {
-          return `/api/photos/r2/compressed/${p.compressed_path.split('/').pop()}`;
-        } else {
-          // Legacy KV photos - use serve endpoint
-          return `/api/photos/serve/${p.compressed_path.replace('assets/', '')}`;
-        }
+        return `/api/photos/r2/compressed/${p.compressed_path.split('/').pop()}`;
       }) || [];
       
       return {
@@ -147,15 +141,9 @@ app.get('/api/items/:id', async (c) => {
     SELECT compressed_path, thumbnail_path FROM photo_assets WHERE item_id = ?
   `).bind(id).all();
   
-  // Convert file paths to public URLs
+  // Convert file paths to public URLs - all photos are now in R2
   const photoUrls = photos.results?.map(p => {
-    // For R2 photos, use R2 URL format
-    if (p.thumbnail_path) {
-      return `/api/photos/r2/compressed/${p.compressed_path.split('/').pop()}`;
-    } else {
-      // Legacy KV photos - use serve endpoint
-      return `/api/photos/serve/${p.compressed_path.replace('assets/', '')}`;
-    }
+    return `/api/photos/r2/compressed/${p.compressed_path.split('/').pop()}`;
   }) || [];
   
   return c.json({
@@ -336,102 +324,7 @@ app.get('/api/photos/r2/:variant/:filename', async (c) => {
   }
 });
 
-// Serve photos from KV storage (legacy endpoint for backward compatibility)
-app.get('/api/photos/serve/*', async (c) => {
-  const url = new URL(c.req.url);
-  const photoPath = url.pathname.replace('/api/photos/serve/', '');
-  
-  try {
-    // Try multiple possible key formats for legacy compatibility
-    const possibleKeys = [
-      `photo-storage/assets/${photoPath}`,    // New format
-      `assets/${photoPath}`,                 // Legacy format 1
-      `photo-storage/${photoPath}`,          // Legacy format 2
-      photoPath                              // Direct path
-    ];
-    
-    console.log(`🔍 Looking for photo: ${photoPath}`);
-    
-    for (const key of possibleKeys) {
-      console.log(`Trying to serve photo with key: ${key}`);
-      
-      // Try new binary format first
-      const { value: buffer, metadata } = await c.env.SESSIONS.getWithMetadata(key, 'arrayBuffer');
-      
-      if (buffer && metadata) {
-        const { mimeType, size, isCompressed } = metadata as any;
-        console.log(`Found binary data for key: ${key}, isCompressed: ${isCompressed}, includes resized: ${key.includes('resized/')}`);
-        
-        // Only serve compressed images through public endpoint
-        if (isCompressed || key.includes('resized/')) {
-          console.log(`✅ Serving binary photo from key: ${key}`);
-          return c.body(buffer, 200, {
-            'Content-Type': mimeType,
-            'Cache-Control': 'public, max-age=31536000', // 1 year cache
-            'Content-Length': size.toString()
-          });
-        } else {
-          console.log(`❌ Skipping binary photo from key: ${key} (not compressed)`);
-        }
-      } else {
-        console.log(`No binary data found for key: ${key}`);
-      }
-      
-      // Try legacy JSON+base64 format
-      const legacyData = await c.env.SESSIONS.get(key);
-      if (legacyData) {
-        try {
-          const { data, mimeType, isCompressed } = JSON.parse(legacyData);
-          console.log(`Found legacy data for key: ${key}, isCompressed: ${isCompressed}, includes resized: ${key.includes('resized/')}`);
-          
-          // Only serve compressed images through public endpoint
-          if (isCompressed || key.includes('resized/')) {
-            console.log(`✅ Serving legacy photo from key: ${key}`);
-            
-            // Convert base64 back to buffer with robust error handling
-            let cleanBase64 = data.replace(/\s/g, '');
-            
-            // Fix common base64 issues
-            cleanBase64 = cleanBase64.replace(/[^A-Za-z0-9+/=]/g, ''); // Remove invalid chars
-            
-            // Ensure proper padding
-            while (cleanBase64.length % 4 !== 0) {
-              cleanBase64 += '=';
-            }
-            
-            console.log(`Attempting to decode base64 of length: ${cleanBase64.length}`);
-            
-            const binaryString = atob(cleanBase64);
-            const legacyBuffer = new Uint8Array(binaryString.length);
-            for (let i = 0; i < binaryString.length; i++) {
-              legacyBuffer[i] = binaryString.charCodeAt(i);
-            }
-            
-            console.log(`Successfully decoded legacy base64 to buffer of size: ${legacyBuffer.length}`)
-            
-            return c.body(legacyBuffer, 200, {
-              'Content-Type': mimeType,
-              'Cache-Control': 'public, max-age=31536000', // 1 year cache
-              'Content-Length': legacyBuffer.length.toString()
-            });
-          } else {
-            console.log(`❌ Skipping legacy photo from key: ${key} (not compressed)`);
-          }
-        } catch (legacyError) {
-          console.error(`Legacy format parsing error for key ${key}:`, legacyError);
-        }
-      } else {
-        console.log(`No legacy data found for key: ${key}`);
-      }
-    }
-    
-    console.log(`Photo not found in any format for path: ${photoPath}`);
-    return c.notFound();
-  } catch (error) {
-    console.error('Photo serve error:', error);
-    return c.notFound();
-  }
-});
+// Legacy KV photo serving removed - all photos now served from R2
 
 // Serve dynamic assets from KV storage (uploaded images) - legacy endpoint
 app.get('/api/assets/*', async (c) => {
