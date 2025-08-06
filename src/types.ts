@@ -6,7 +6,6 @@ export interface Env {
   ADMIN_USERNAME: string;
   ADMIN_PASSWORD: string;
   JWT_SECRET: string;
-  CLOUDFLARE_ACCOUNT_ID?: string;
   ENVIRONMENT?: string;
 }
 

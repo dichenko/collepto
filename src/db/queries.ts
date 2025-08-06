@@ -34,10 +34,10 @@ export class DatabaseQueries {
       photos: photos.results?.map(p => {
         // For R2 photos, use the appropriate URL format
         if (p.thumbnail_path) {
-          return `/api/photos/r2/large/${p.compressed_path.split('/').pop()}`;
+          return `/api/photos/r2/compressed/${p.compressed_path.split('/').pop()}`;
         } else {
-          // Legacy KV photos
-          return p.compressed_path;
+          // Legacy KV photos - use serve endpoint
+          return `/api/photos/serve/${p.compressed_path.replace('assets/', '')}`;
         }
       }) || []
     } as CollectorItem;

@@ -104,12 +104,18 @@ app.get('/api/items', async (c) => {
   const itemsWithPhotos = await Promise.all(
     (items.results || []).map(async (item) => {
       const photos = await c.env.DB.prepare(`
-        SELECT compressed_path FROM photo_assets WHERE item_id = ? LIMIT 3
+        SELECT compressed_path, thumbnail_path FROM photo_assets WHERE item_id = ? LIMIT 3
       `).bind(item.id).all();
       
       // Convert file paths to public URLs
       const photoUrls = photos.results?.map(p => {
-        return `/api/photos/serve/${p.compressed_path.replace('assets/', '')}`;
+        // For R2 photos, use R2 URL format
+        if (p.thumbnail_path) {
+          return `/api/photos/r2/compressed/${p.compressed_path.split('/').pop()}`;
+        } else {
+          // Legacy KV photos - use serve endpoint
+          return `/api/photos/serve/${p.compressed_path.replace('assets/', '')}`;
+        }
       }) || [];
       
       return {
@@ -138,12 +144,18 @@ app.get('/api/items/:id', async (c) => {
   
   // Get photos for this item
   const photos = await c.env.DB.prepare(`
-    SELECT compressed_path FROM photo_assets WHERE item_id = ?
+    SELECT compressed_path, thumbnail_path FROM photo_assets WHERE item_id = ?
   `).bind(id).all();
   
   // Convert file paths to public URLs
   const photoUrls = photos.results?.map(p => {
-    return `/api/photos/serve/${p.compressed_path.replace('assets/', '')}`;
+    // For R2 photos, use R2 URL format
+    if (p.thumbnail_path) {
+      return `/api/photos/r2/compressed/${p.compressed_path.split('/').pop()}`;
+    } else {
+      // Legacy KV photos - use serve endpoint
+      return `/api/photos/serve/${p.compressed_path.replace('assets/', '')}`;
+    }
   }) || [];
   
   return c.json({
