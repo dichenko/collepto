@@ -166,7 +166,7 @@ export function SearchFilters({ onSearch, availableTags, availableCategories, in
                     variant={selectedTags.includes(tag) ? "default" : "outline"}
                     size="sm"
                     onClick={() => handleTagToggle(tag)}
-                    className="h-auto py-1 px-3 text-sm transition-all duration-200 hover:scale-105 active:scale-95 active:transition-none"
+                    className="h-auto py-1 px-3 text-sm btn-refined"
                   >
                     {tag}
                     {selectedTags.includes(tag) && (

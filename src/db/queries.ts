@@ -25,13 +25,21 @@ export class DatabaseQueries {
     
     // Get photos
     const photos = await this.env.DB.prepare(`
-      SELECT compressed_path FROM photo_assets WHERE item_id = ?
+      SELECT compressed_path, thumbnail_path FROM photo_assets WHERE item_id = ?
     `).bind(id).all();
     
     return {
       ...item,
       tags: JSON.parse(item.tags || '[]'),
-      photos: photos.results?.map(p => p.compressed_path) || []
+      photos: photos.results?.map(p => {
+        // For R2 photos, use the appropriate URL format
+        if (p.thumbnail_path) {
+          return `/api/photos/r2/large/${p.compressed_path.split('/').pop()}`;
+        } else {
+          // Legacy KV photos
+          return p.compressed_path;
+        }
+      }) || []
     } as CollectorItem;
   }
 
@@ -213,7 +221,7 @@ export class DatabaseQueries {
   // Photo assets queries
   async getPhotosByItemId(itemId: string): Promise<PhotoAsset[]> {
     const result = await this.env.DB.prepare(`
-      SELECT * FROM photo_assets WHERE item_id = ?
+      SELECT id, item_id, original_path, compressed_path, thumbnail_path, filename, size, width, height, created_at FROM photo_assets WHERE item_id = ?
     `).bind(itemId).all();
     
     return result.results as PhotoAsset[] || [];
@@ -224,18 +232,37 @@ export class DatabaseQueries {
     const now = new Date().toISOString();
     
     await this.env.DB.prepare(`
-      INSERT INTO photo_assets (id, item_id, original_path, compressed_path, filename, size, created_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?)
-    `).bind(id, photo.itemId, photo.originalPath, photo.compressedPath, photo.filename, photo.size, now).run();
+      INSERT INTO photo_assets (id, item_id, original_path, compressed_path, thumbnail_path, filename, size, width, height, created_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).bind(
+      id, 
+      photo.itemId, 
+      photo.originalPath, 
+      photo.compressedPath, 
+      photo.thumbnailPath,
+      photo.filename, 
+      photo.size,
+      photo.width || null,
+      photo.height || null,
+      now
+    ).run();
     
     return id;
+  }
+
+    async getPhotoById(id: string): Promise<PhotoAsset | null> {
+    const result = await this.env.DB.prepare(`
+      SELECT id, item_id, original_path, compressed_path, thumbnail_path, filename, size, width, height, created_at FROM photo_assets WHERE id = ?
+    `).bind(id).first();
+    
+    return result as PhotoAsset || null;
   }
 
   async deletePhotoAsset(id: string): Promise<boolean> {
     const result = await this.env.DB.prepare(`
       DELETE FROM photo_assets WHERE id = ?
     `).bind(id).run();
-    
+
     return result.changes > 0;
   }
 

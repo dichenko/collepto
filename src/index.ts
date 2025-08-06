@@ -7,6 +7,7 @@ import { blogRouter } from './api/blog';
 import { photosRouter } from './api/photos';
 import { exportRouter } from './api/export';
 import { authRouter } from './api/auth';
+
 import type { Env } from './types';
 
 // No longer needed - KV stores binary data directly
@@ -293,7 +294,37 @@ app.route('/api/admin/blog', blogRouter);
 app.route('/api/admin/photos', photosRouter);
 app.route('/api/admin/export', exportRouter);
 
-// Serve photos from KV storage (public endpoint for compressed images)
+// Serve photos from R2 storage
+app.get('/api/photos/r2/:variant/:filename', async (c) => {
+  try {
+    const variant = c.req.param('variant'); // 'original', 'compressed', 'thumbnail'
+    const filename = c.req.param('filename');
+    
+    // Construct the R2 path based on variant
+    const path = `${variant}/${filename}`;
+    
+    // Get file from R2
+    const object = await c.env.PHOTOS_BUCKET.get(path);
+    
+    if (!object) {
+      console.log(`R2 photo not found: ${path}`);
+      return c.notFound();
+    }
+
+    const headers = new Headers();
+    object.writeHttpMetadata(headers);
+    headers.set('Cache-Control', 'public, max-age=31536000'); // 1 year cache
+    
+    console.log(`✅ Serving R2 photo: ${path}`);
+    return c.body(object.body, 200, headers);
+    
+  } catch (error) {
+    console.error('R2 photo serve error:', error);
+    return c.notFound();
+  }
+});
+
+// Serve photos from KV storage (legacy endpoint for backward compatibility)
 app.get('/api/photos/serve/*', async (c) => {
   const url = new URL(c.req.url);
   const photoPath = url.pathname.replace('/api/photos/serve/', '');

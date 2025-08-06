@@ -177,11 +177,11 @@ export function AdminPanel() {
               <Badge variant="secondary">Администратор</Badge>
             </div>
             <div className="flex items-center gap-2">
-              <Button onClick={handleExport} variant="outline" size="sm" className="gap-2">
+              <Button onClick={handleExport} variant="outline" size="sm" className="gap-2 btn-refined">
                 <Download className="w-4 h-4" />
                 Экспорт
               </Button>
-              <Button onClick={handleLogout} variant="outline" size="sm" className="gap-2">
+              <Button onClick={handleLogout} variant="outline" size="sm" className="gap-2 btn-refined">
                 <LogOut className="w-4 h-4" />
                 Выйти
               </Button>
@@ -199,7 +199,7 @@ export function AdminPanel() {
 
         {/* Stats Cards */}
         <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
-          <Card>
+          <Card className="card-refined">
             <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
               <CardTitle className="text-sm font-medium">Предметы</CardTitle>
               <Database className="h-4 w-4 text-muted-foreground" />
@@ -210,7 +210,7 @@ export function AdminPanel() {
             </CardContent>
           </Card>
 
-          <Card>
+          <Card className="card-refined">
             <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
               <CardTitle className="text-sm font-medium">Посты блога</CardTitle>
               <FileText className="h-4 w-4 text-muted-foreground" />
@@ -223,7 +223,7 @@ export function AdminPanel() {
             </CardContent>
           </Card>
 
-          <Card>
+          <Card className="card-refined">
             <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
               <CardTitle className="text-sm font-medium">Категории</CardTitle>
               <Users className="h-4 w-4 text-muted-foreground" />
@@ -236,7 +236,7 @@ export function AdminPanel() {
             </CardContent>
           </Card>
 
-          <Card>
+          <Card className="card-refined">
             <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
               <CardTitle className="text-sm font-medium">Фотографии</CardTitle>
               <Image className="h-4 w-4 text-muted-foreground" />
@@ -268,14 +268,14 @@ export function AdminPanel() {
 
             <div className="grid gap-4">
               {items.map((item) => (
-                <Card key={item.id}>
+                <Card key={item.id} className="card-refined">
                   <CardContent className="p-4">
                     <div className="flex items-start justify-between">
                       <div className="flex-1">
                         <div className="flex items-center gap-2 mb-2">
                           <h3 className="font-medium">{item.title}</h3>
-                          <Badge variant="outline">{item.category}</Badge>
-                          <Badge variant="secondary">{item.year}</Badge>
+                          <Badge variant="outline" className="badge-refined">{item.category}</Badge>
+                          <Badge variant="secondary" className="badge-refined">{item.year}</Badge>
                         </div>
                         <p className="text-sm text-muted-foreground line-clamp-2">
                           {item.description}
@@ -286,11 +286,11 @@ export function AdminPanel() {
                         </div>
                       </div>
                       <div className="flex items-center gap-2">
-                        <Button variant="outline" size="sm" className="gap-1">
+                        <Button variant="outline" size="sm" className="gap-1 btn-refined">
                           <Eye className="w-3 h-3" />
                           Просмотр
                         </Button>
-                        <Button variant="outline" size="sm" className="gap-1">
+                        <Button variant="outline" size="sm" className="gap-1 btn-refined">
                           <Edit className="w-3 h-3" />
                           Изменить
                         </Button>
@@ -317,16 +317,16 @@ export function AdminPanel() {
 
             <div className="grid gap-4">
               {blogPosts.map((post) => (
-                <Card key={post.id}>
+                <Card key={post.id} className="card-refined">
                   <CardContent className="p-4">
                     <div className="flex items-start justify-between">
                       <div className="flex-1">
                         <div className="flex items-center gap-2 mb-2">
                           <h3 className="font-medium">{post.title}</h3>
-                          <Badge variant={post.published ? "default" : "secondary"}>
+                          <Badge variant={post.published ? "default" : "secondary"} className="badge-refined">
                             {post.published ? "Опубликован" : "Черновик"}
                           </Badge>
-                          <Badge variant="outline">{post.category}</Badge>
+                          <Badge variant="outline" className="badge-refined">{post.category}</Badge>
                         </div>
                         <p className="text-sm text-muted-foreground line-clamp-2">
                           {post.excerpt}
@@ -338,11 +338,11 @@ export function AdminPanel() {
                         </div>
                       </div>
                       <div className="flex items-center gap-2">
-                        <Button variant="outline" size="sm" className="gap-1">
+                        <Button variant="outline" size="sm" className="gap-1 btn-refined">
                           <Eye className="w-3 h-3" />
                           Просмотр
                         </Button>
-                        <Button variant="outline" size="sm" className="gap-1">
+                        <Button variant="outline" size="sm" className="gap-1 btn-refined">
                           <Edit className="w-3 h-3" />
                           Изменить
                         </Button>

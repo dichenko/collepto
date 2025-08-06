@@ -213,7 +213,7 @@ export function ItemEditor({ itemId, onSave, onCancel }: ItemEditorProps) {
       {/* Header */}
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-4">
-          <Button variant="outline" onClick={onCancel} className="gap-2">
+          <Button variant="outline" onClick={onCancel} className="gap-2 btn-refined">
             <ArrowLeft className="w-4 h-4" />
             Назад
           </Button>
@@ -238,7 +238,7 @@ export function ItemEditor({ itemId, onSave, onCancel }: ItemEditorProps) {
 
       <div className="grid lg:grid-cols-2 gap-6">
         {/* Main Information */}
-        <Card>
+        <Card className="card-refined">
           <CardHeader>
             <CardTitle>Основная информация</CardTitle>
           </CardHeader>
@@ -294,7 +294,7 @@ export function ItemEditor({ itemId, onSave, onCancel }: ItemEditorProps) {
         </Card>
 
         {/* Details */}
-        <Card>
+        <Card className="card-refined">
           <CardHeader>
             <CardTitle>Детали</CardTitle>
           </CardHeader>
@@ -430,7 +430,7 @@ export function ItemEditor({ itemId, onSave, onCancel }: ItemEditorProps) {
       </div>
 
       {/* Tags */}
-      <Card>
+      <Card className="card-refined">
         <CardHeader>
           <CardTitle>Теги</CardTitle>
         </CardHeader>
@@ -451,7 +451,7 @@ export function ItemEditor({ itemId, onSave, onCancel }: ItemEditorProps) {
           {item.tags && item.tags.length > 0 && (
             <div className="flex flex-wrap gap-2">
               {item.tags.map((tag, index) => (
-                <Badge key={index} variant="secondary" className="gap-1">
+                <Badge key={index} variant="secondary" className="gap-1 badge-refined">
                   {tag}
                   <button
                     onClick={() => handleRemoveTag(tag)}
@@ -468,7 +468,7 @@ export function ItemEditor({ itemId, onSave, onCancel }: ItemEditorProps) {
 
       {/* Photo Management */}
       <Separator />
-      <Card>
+      <Card className="card-refined">
         <CardHeader>
           <CardTitle>Фотографии предмета</CardTitle>
         </CardHeader>

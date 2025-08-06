@@ -79,75 +79,106 @@ export function PhotoUploader({
     return null;
   };
 
-  // Client-side image processing
-  const processImage = async (file: File): Promise<File> => {
+  // Client-side image processing - creates 3 variants: original, compressed (1920px), thumbnail (400px)
+  const processImageVariants = async (file: File): Promise<{
+    original: File;
+    compressed: File;
+    thumbnail: File;
+    width: number;
+    height: number;
+  }> => {
     return new Promise((resolve, reject) => {
       const img = new Image();
       img.onload = () => {
         try {
-          // Calculate new dimensions (max 1920px on longest side)
-          const maxSize = 1920;
-          let { width, height } = img;
-          
-          if (width > maxSize || height > maxSize) {
-            if (width > height) {
-              height = (height * maxSize) / width;
-              width = maxSize;
-            } else {
-              width = (width * maxSize) / height;
-              height = maxSize;
-            }
-          }
+          const originalWidth = img.width;
+          const originalHeight = img.height;
 
-          // Create canvas for resizing
-          const canvas = document.createElement('canvas');
-          const ctx = canvas.getContext('2d');
-          
-          if (!ctx) {
-            throw new Error('Canvas context not available');
-          }
+          // Helper function to resize image
+          const resizeImage = (targetMaxSize: number, quality: number = 0.8): Promise<File> => {
+            return new Promise((resolveResize, rejectResize) => {
+              let { width, height } = img;
+              
+              // Calculate new dimensions
+              if (width > targetMaxSize || height > targetMaxSize) {
+                if (width > height) {
+                  height = (height * targetMaxSize) / width;
+                  width = targetMaxSize;
+                } else {
+                  width = (width * targetMaxSize) / height;
+                  height = targetMaxSize;
+                }
+              }
 
-          canvas.width = width;
-          canvas.height = height;
-
-          // Draw resized image
-          ctx.drawImage(img, 0, 0, width, height);
-
-          // Convert to JPEG with 80% quality
-          canvas.toBlob(
-            (blob) => {
-              if (!blob) {
-                reject(new Error('Failed to process image'));
+              // Create canvas for resizing
+              const canvas = document.createElement('canvas');
+              const ctx = canvas.getContext('2d');
+              
+              if (!ctx) {
+                rejectResize(new Error('Canvas context not available'));
                 return;
               }
 
-              // Create new File object
-              const processedFile = new File(
-                [blob], 
-                file.name.replace(/\.[^/.]+$/, '.jpg'), // Change extension to .jpg
-                { 
-                  type: 'image/jpeg',
-                  lastModified: Date.now()
-                }
-              );
+              canvas.width = width;
+              canvas.height = height;
 
-              console.log(`Image processed: ${file.size} → ${processedFile.size} bytes (${Math.round(width)}x${Math.round(height)}px)`);
-              resolve(processedFile);
-            },
-            'image/jpeg',
-            0.8 // 80% quality
-          );
+              // Draw resized image
+              ctx.drawImage(img, 0, 0, width, height);
+
+              // Convert to JPEG
+              canvas.toBlob(
+                (blob) => {
+                  if (!blob) {
+                    rejectResize(new Error('Failed to process image'));
+                    return;
+                  }
+
+                  // Create new File object
+                  const processedFile = new File(
+                    [blob], 
+                    file.name.replace(/\.[^/.]+$/, '.jpg'),
+                    { 
+                      type: 'image/jpeg',
+                      lastModified: Date.now()
+                    }
+                  );
+
+                  resolveResize(processedFile);
+                },
+                'image/jpeg',
+                quality
+              );
+            });
+          };
+
+          // Create all variants
+          Promise.all([
+            Promise.resolve(file), // Original file
+            resizeImage(1920, 0.85), // Compressed version (1920px max)
+            resizeImage(400, 0.8)    // Thumbnail version (400px max)
+          ]).then(([original, compressed, thumbnail]) => {
+            console.log(`Image variants created:
+              Original: ${original.size} bytes (${originalWidth}x${originalHeight}px)
+              Compressed: ${compressed.size} bytes (max 1920px)
+              Thumbnail: ${thumbnail.size} bytes (max 400px)`);
+            
+            resolve({
+              original,
+              compressed,
+              thumbnail,
+              width: originalWidth,
+              height: originalHeight
+            });
+          }).catch(reject);
+
         } catch (error) {
           console.error('Image processing error:', error);
-          // If processing fails, return original file
-          resolve(file);
+          reject(error);
         }
       };
 
       img.onerror = () => {
-        console.error('Failed to load image for processing');
-        // If image loading fails, return original file
-        resolve(file);
+        reject(new Error('Failed to load image for processing'));
       };
 
       // Load image
@@ -171,13 +202,13 @@ export function PhotoUploader({
           : f
       ));
 
-      // Process image on client side (resize & compress)
-      const processedFile = await processImage(file);
+      // Process image on client side (create 3 variants)
+      const imageVariants = await processImageVariants(file);
 
-      // Update progress to 20% - uploading
+      // Update progress to 30% - uploading
       setUploadingFiles(prev => prev.map(f => 
         f.file === file 
-          ? { ...f, progress: 20 }
+          ? { ...f, progress: 30 }
           : f
       ));
 
@@ -190,8 +221,8 @@ export function PhotoUploader({
         ));
       }, 300);
 
-      // Upload BOTH original and processed files
-      const response = await apiClient.uploadPhotoBoth(itemId, file, processedFile);
+      // Upload all 3 variants to R2
+      const response = await apiClient.uploadPhotoR2(itemId, imageVariants);
 
       clearInterval(progressInterval);
 
@@ -203,7 +234,7 @@ export function PhotoUploader({
                 ...f, 
                 progress: 100, 
                 status: 'success',
-                url: response.data!.publicUrl,
+                url: response.data!.url,
                 id: response.data!.id
               }
             : f

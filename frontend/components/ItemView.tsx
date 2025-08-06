@@ -60,7 +60,7 @@ export function ItemView({ item, onBack, onTagClick, onCategoryClick }: ItemView
             <div className="absolute top-4 left-4">
               <Badge 
                 variant="secondary" 
-                className="bg-white/90 text-primary cursor-pointer transition-all duration-200 hover:bg-primary hover:text-primary-foreground hover:scale-105 active:scale-95 active:transition-none select-none"
+                className="bg-white/90 text-primary cursor-pointer badge-refined select-none"
                 onClick={() => {
                   onCategoryClick?.(item.category);
                   onBack();
@@ -209,7 +209,7 @@ export function ItemView({ item, onBack, onTagClick, onCategoryClick }: ItemView
                   <Badge
                     key={index}
                     variant="outline"
-                    className="cursor-pointer transition-all duration-200 hover:bg-primary hover:text-primary-foreground hover:scale-105 active:scale-95 active:transition-none select-none"
+                    className="cursor-pointer badge-refined select-none"
                     onClick={() => {
                       onTagClick?.(tag);
                       onBack();

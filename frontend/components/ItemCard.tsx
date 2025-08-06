@@ -52,7 +52,7 @@ export function ItemCard({
           <div className="absolute top-2 left-2">
             <Badge 
               variant="secondary" 
-              className="bg-white/90 text-primary cursor-pointer transition-all duration-200 hover:bg-primary hover:text-primary-foreground hover:scale-105 active:scale-95 active:transition-none select-none"
+              className="bg-white/90 text-primary cursor-pointer badge-refined select-none"
               onClick={(e) => {
                 e.stopPropagation();
                 onCategoryClick?.(item.category);
@@ -98,7 +98,7 @@ export function ItemCard({
               <Badge 
                 key={index} 
                 variant="outline" 
-                className="text-xs cursor-pointer transition-all duration-200 hover:bg-primary hover:text-primary-foreground hover:scale-105 active:scale-95 active:transition-none select-none"
+                className="text-xs cursor-pointer badge-refined select-none"
                 onClick={() => onTagClick?.(tag)}
               >
                 {tag}
@@ -107,7 +107,7 @@ export function ItemCard({
             {item.tags.length > 4 && (
               <Badge 
                 variant="outline" 
-                className="text-xs cursor-pointer transition-all duration-200 hover:bg-primary hover:text-primary-foreground hover:scale-105 active:scale-95 active:transition-none select-none"
+                className="text-xs cursor-pointer badge-refined select-none"
                 onClick={() => {
                   // Show remaining tags or handle overflow click
                   const remainingTags = item.tags.slice(4).join(', ');

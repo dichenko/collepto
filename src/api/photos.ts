@@ -1,7 +1,7 @@
 import { Hono } from 'hono';
 import type { Env } from '../types';
 import { DatabaseQueries } from '../db/queries';
-import { ImageProcessor, validateImageFile } from '../lib/image-processor';
+import { R2ImageProcessor, type ImageVariant } from '../lib/r2-image-processor';
 
 // No longer needed - KV stores binary data directly
 
@@ -15,11 +15,31 @@ router.get('/item/:itemId', async (c) => {
     const photos = await db.getPhotosByItemId(itemId);
     
     // Convert to format expected by PhotoUploader with public URLs
-    const photosWithUrls = photos.map(photo => ({
-      id: photo.id,
-      url: `/api/photos/serve/${photo.compressedPath.replace('assets/', '')}`,
-      filename: photo.filename
-    }));
+    const r2Processor = new R2ImageProcessor(c.env.PHOTOS_BUCKET);
+    const photosWithUrls = photos.map(photo => {
+      // Check if this is an R2 photo or legacy KV photo
+      if (photo.thumbnailPath) {
+        // New R2 photo - use R2 URLs
+        const imageUrls = r2Processor.getImageUrls(
+          photo.originalPath, 
+          photo.compressedPath, 
+          photo.thumbnailPath
+        );
+        return {
+          id: photo.id,
+          url: imageUrls.compressedUrl,
+          thumbnailUrl: imageUrls.thumbnailUrl,
+          filename: photo.filename
+        };
+      } else {
+        // Legacy KV photo - use old URL format
+        return {
+          id: photo.id,
+          url: `/api/photos/serve/${photo.compressedPath.replace('assets/', '')}`,
+          filename: photo.filename
+        };
+      }
+    });
     
     return c.json({
       success: true,
@@ -31,7 +51,24 @@ router.get('/item/:itemId', async (c) => {
   }
 });
 
-// POST upload photo for an item
+// Validation function for image files
+function validateImageFile(file: File): { valid: boolean; error?: string } {
+  // Check file size (max 50MB)
+  const maxSize = 50 * 1024 * 1024;
+  if (file.size > maxSize) {
+    return { valid: false, error: 'File size too large (max 50MB)' };
+  }
+
+  // Check file type
+  const allowedTypes = ['image/jpeg', 'image/jpg', 'image/png', 'image/webp'];
+  if (!allowedTypes.includes(file.type)) {
+    return { valid: false, error: 'Invalid file type. Only JPEG, PNG, and WebP are allowed.' };
+  }
+
+  return { valid: true };
+}
+
+// POST upload photo for an item (expects pre-resized variants from client)
 router.post('/item/:itemId/upload', async (c) => {
   try {
     const itemId = c.req.param('itemId');
@@ -52,42 +89,83 @@ router.post('/item/:itemId/upload', async (c) => {
       }, 400);
     }
 
-    // Get uploaded file
+    // Get uploaded files (client sends 3 variants: original, compressed, thumbnail)
     const formData = await c.req.formData();
-    const file = formData.get('photo') as File;
+    const originalFile = formData.get('original') as File;
+    const compressedFile = formData.get('compressed') as File;
+    const thumbnailFile = formData.get('thumbnail') as File;
+    const width = parseInt(formData.get('width') as string);
+    const height = parseInt(formData.get('height') as string);
     
-    if (!file) {
-      return c.json({ success: false, error: 'No file uploaded' }, 400);
-    }
-
-    // Validate file
-    const validation = validateImageFile(file);
-    if (!validation.valid) {
+    if (!originalFile || !compressedFile || !thumbnailFile) {
       return c.json({ 
         success: false, 
-        error: validation.error 
+        error: 'Missing image variants. Client must send original, compressed (1920px), and thumbnail (400px) versions.' 
       }, 400);
     }
 
-    // Process image
-    const imageProcessor = new ImageProcessor(c.env);
-    const processedImage = await imageProcessor.processImage(file, itemId);
+    // Validate files
+    const validationResults = [
+      { file: originalFile, name: 'original' },
+      { file: compressedFile, name: 'compressed' },
+      { file: thumbnailFile, name: 'thumbnail' }
+    ].map(({ file, name }) => ({ 
+      name, 
+      validation: validateImageFile(file) 
+    }));
+
+    const invalidFiles = validationResults.filter(r => !r.validation.valid);
+    if (invalidFiles.length > 0) {
+      return c.json({ 
+        success: false, 
+        error: `Invalid files: ${invalidFiles.map(f => `${f.name}: ${f.validation.error}`).join(', ')}` 
+      }, 400);
+    }
+
+    // Prepare variants for R2 storage
+    const variants: ImageVariant[] = [
+      { file: originalFile, path: '', variant: 'original' },
+      { file: compressedFile, path: '', variant: 'compressed' },
+      { file: thumbnailFile, path: '', variant: 'thumbnail' }
+    ];
+
+    // Save to R2
+    const r2Processor = new R2ImageProcessor(c.env.PHOTOS_BUCKET);
+    const processedData = await r2Processor.saveProcessedImages(variants);
+    
+    // Update with actual dimensions
+    processedData.width = width || 0;
+    processedData.height = height || 0;
 
     // Save to database
     const photoId = await db.createPhotoAsset({
       itemId,
-      originalPath: processedImage.originalPath,
-      compressedPath: processedImage.compressedPath,
-      filename: processedImage.filename,
-      size: processedImage.size
+      originalPath: processedData.originalPath,
+      compressedPath: processedData.compressedPath,
+      thumbnailPath: processedData.thumbnailPath,
+      filename: processedData.filename,
+      size: processedData.size,
+      width: processedData.width,
+      height: processedData.height
     });
+
+    // Get URLs for response
+    const imageUrls = r2Processor.getImageUrls(
+      processedData.originalPath,
+      processedData.compressedPath,
+      processedData.thumbnailPath
+    );
 
     return c.json({
       success: true,
       data: {
         id: photoId,
-        ...processedImage,
-        publicUrl: imageProcessor.getPublicUrl(processedImage.compressedPath)
+        filename: processedData.filename,
+        size: processedData.size,
+        width: processedData.width,
+        height: processedData.height,
+        url: imageUrls.compressedUrl,
+        thumbnailUrl: imageUrls.thumbnailUrl
       }
     }, 201);
 
@@ -100,7 +178,7 @@ router.post('/item/:itemId/upload', async (c) => {
   }
 });
 
-// POST upload multiple photos for an item
+// POST upload multiple photos for an item (expects pre-resized variants from client)
 router.post('/item/:itemId/upload-multiple', async (c) => {
   try {
     const itemId = c.req.param('itemId');
@@ -115,56 +193,110 @@ router.post('/item/:itemId/upload-multiple', async (c) => {
     // Check photo limit
     const existingPhotos = await db.getPhotosByItemId(itemId);
     const formData = await c.req.formData();
-    const files = formData.getAll('photos') as File[];
     
-    if (files.length === 0) {
-      return c.json({ success: false, error: 'No files uploaded' }, 400);
+    // Parse multiple sets of variants (each photo sends 3 files + metadata)
+    const photoSets: Array<{
+      original: File;
+      compressed: File;
+      thumbnail: File;
+      width: number;
+      height: number;
+      filename: string;
+    }> = [];
+
+    // Group files by photo index
+    const photoIndices = new Set<string>();
+    for (const [key] of formData.entries()) {
+      const match = key.match(/^photo_(\d+)_/);
+      if (match) {
+        photoIndices.add(match[1]);
+      }
     }
 
-    if (existingPhotos.length + files.length > 10) {
+    for (const index of photoIndices) {
+      const original = formData.get(`photo_${index}_original`) as File;
+      const compressed = formData.get(`photo_${index}_compressed`) as File;
+      const thumbnail = formData.get(`photo_${index}_thumbnail`) as File;
+      const width = parseInt(formData.get(`photo_${index}_width`) as string);
+      const height = parseInt(formData.get(`photo_${index}_height`) as string);
+      const filename = formData.get(`photo_${index}_filename`) as string;
+
+      if (original && compressed && thumbnail) {
+        photoSets.push({ original, compressed, thumbnail, width, height, filename });
+      }
+    }
+    
+    if (photoSets.length === 0) {
+      return c.json({ success: false, error: 'No photo sets uploaded' }, 400);
+    }
+
+    if (existingPhotos.length + photoSets.length > 10) {
       return c.json({ 
         success: false, 
-        error: `Cannot upload ${files.length} photos. Maximum 10 photos allowed per item (currently ${existingPhotos.length})` 
+        error: `Cannot upload ${photoSets.length} photos. Maximum 10 photos allowed per item (currently ${existingPhotos.length})` 
       }, 400);
     }
 
     // Validate all files first
-    for (const file of files) {
-      const validation = validateImageFile(file);
-      if (!validation.valid) {
+    for (const photoSet of photoSets) {
+      const validationResults = [
+        { file: photoSet.original, name: 'original' },
+        { file: photoSet.compressed, name: 'compressed' },
+        { file: photoSet.thumbnail, name: 'thumbnail' }
+      ].map(({ file, name }) => ({ name, validation: validateImageFile(file) }));
+
+      const invalidFiles = validationResults.filter(r => !r.validation.valid);
+      if (invalidFiles.length > 0) {
         return c.json({ 
           success: false, 
-          error: `File ${file.name}: ${validation.error}` 
+          error: `File ${photoSet.filename}: ${invalidFiles.map(f => `${f.name}: ${f.validation.error}`).join(', ')}` 
         }, 400);
       }
     }
 
     // Process all images
-    const imageProcessor = new ImageProcessor(c.env);
+    const r2Processor = new R2ImageProcessor(c.env.PHOTOS_BUCKET);
     const results = [];
     const errors = [];
 
-    for (const file of files) {
+    for (const photoSet of photoSets) {
       try {
-        const processedImage = await imageProcessor.processImage(file, itemId);
+        const variants: ImageVariant[] = [
+          { file: photoSet.original, path: '', variant: 'original' },
+          { file: photoSet.compressed, path: '', variant: 'compressed' },
+          { file: photoSet.thumbnail, path: '', variant: 'thumbnail' }
+        ];
+
+        const processedData = await r2Processor.saveProcessedImages(variants);
+        processedData.width = photoSet.width || 0;
+        processedData.height = photoSet.height || 0;
         
         const photoId = await db.createPhotoAsset({
           itemId,
-          originalPath: processedImage.originalPath,
-          compressedPath: processedImage.compressedPath,
-          filename: processedImage.filename,
-          size: processedImage.size
+          originalPath: processedData.originalPath,
+          compressedPath: processedData.compressedPath,
+          thumbnailPath: processedData.thumbnailPath,
+          filename: processedData.filename,
+          size: processedData.size,
+          width: processedData.width,
+          height: processedData.height
         });
+
+        const imageUrls = r2Processor.getImageUrls(
+          processedData.originalPath,
+          processedData.compressedPath,
+          processedData.thumbnailPath
+        );
 
         results.push({
           id: photoId,
-          filename: file.name,
-          ...processedImage,
-          publicUrl: imageProcessor.getPublicUrl(processedImage.compressedPath)
+          filename: photoSet.filename,
+          url: imageUrls.compressedUrl,
+          thumbnailUrl: imageUrls.thumbnailUrl
         });
       } catch (error) {
         errors.push({
-          filename: file.name,
+          filename: photoSet.filename,
           error: error instanceof Error ? error.message : 'Upload failed'
         });
       }
@@ -188,87 +320,6 @@ router.post('/item/:itemId/upload-multiple', async (c) => {
   }
 });
 
-// POST upload both original and processed photo for an item
-router.post('/item/:itemId/upload-both', async (c) => {
-  try {
-    const itemId = c.req.param('itemId');
-    
-    // Check if item exists
-    const db = new DatabaseQueries(c.env);
-    const item = await db.getItemById(itemId);
-    if (!item) {
-      return c.json({ success: false, error: 'Item not found' }, 404);
-    }
-
-    // Check photo limit (10 photos max per item)
-    const existingPhotos = await db.getPhotosByItemId(itemId);
-    if (existingPhotos.length >= 10) {
-      return c.json({ 
-        success: false, 
-        error: 'Maximum 10 photos allowed per item' 
-      }, 400);
-    }
-
-    // Get uploaded files
-    const formData = await c.req.formData();
-    const originalFile = formData.get('original') as File;
-    const processedFile = formData.get('processed') as File;
-    
-    if (!originalFile || !processedFile) {
-      return c.json({ 
-        success: false, 
-        error: 'Both original and processed files are required' 
-      }, 400);
-    }
-
-    // Validate both files
-    const originalValidation = validateImageFile(originalFile);
-    if (!originalValidation.valid) {
-      return c.json({ 
-        success: false, 
-        error: `Original file: ${originalValidation.error}` 
-      }, 400);
-    }
-
-    const processedValidation = validateImageFile(processedFile);
-    if (!processedValidation.valid) {
-      return c.json({ 
-        success: false, 
-        error: `Processed file: ${processedValidation.error}` 
-      }, 400);
-    }
-
-    // Process with both files
-    const imageProcessor = new ImageProcessor(c.env);
-    const processedImage = await imageProcessor.processBothFiles(originalFile, processedFile, itemId);
-
-    // Save to database
-    const photoId = await db.createPhotoAsset({
-      itemId,
-      originalPath: processedImage.originalPath,
-      compressedPath: processedImage.compressedPath,
-      filename: processedImage.filename,
-      size: processedFile.size // Use processed file size
-    });
-
-    return c.json({
-      success: true,
-      data: {
-        id: photoId,
-        ...processedImage,
-        publicUrl: imageProcessor.getPublicUrl(processedImage.compressedPath)
-      }
-    }, 201);
-
-  } catch (error) {
-    console.error('Upload both files error:', error);
-    return c.json({ 
-      success: false, 
-      error: error instanceof Error ? error.message : 'Failed to upload photos' 
-    }, 500);
-  }
-});
-
 // DELETE photo
 router.delete('/:photoId', async (c) => {
   try {
@@ -276,16 +327,27 @@ router.delete('/:photoId', async (c) => {
     const db = new DatabaseQueries(c.env);
     
     // Get photo info first
-    const photos = await db.getPhotosByItemId(''); // This needs a better query
-    const photo = photos.find(p => p.id === photoId);
+    const photo = await db.getPhotoById(photoId);
     
     if (!photo) {
       return c.json({ success: false, error: 'Photo not found' }, 404);
     }
 
     // Delete files from storage
-    const imageProcessor = new ImageProcessor(c.env);
-    await imageProcessor.deleteFiles(photo.originalPath, photo.compressedPath);
+    if (photo.thumbnailPath) {
+      // R2 photo - delete all variants from R2
+      const r2Processor = new R2ImageProcessor(c.env.PHOTOS_BUCKET);
+      await r2Processor.deleteFiles({
+        original: photo.originalPath,
+        compressed: photo.compressedPath,
+        thumbnail: photo.thumbnailPath
+      });
+    } else {
+      // Legacy KV photo - use old deletion method
+      const { ImageProcessor } = await import('../lib/image-processor');
+      const imageProcessor = new ImageProcessor(c.env);
+      await imageProcessor.deleteFiles(photo.originalPath, photo.compressedPath);
+    }
     
     // Delete from database
     await db.deletePhotoAsset(photoId);
@@ -470,9 +532,25 @@ router.get('/:photoId', async (c) => {
       return c.json({ success: false, error: 'Photo not found' }, 404);
     }
     
-    // Generate public URL
-    const imageProcessor = new ImageProcessor(c.env);
-    const publicUrl = imageProcessor.getPublicUrl(photo.compressed_path);
+    // Generate public URL based on photo type
+    let publicUrl, thumbnailUrl, originalUrl;
+    if (photo.thumbnail_path) {
+      // R2 photo - use R2 URLs
+      const r2Processor = new R2ImageProcessor(c.env.PHOTOS_BUCKET);
+      const imageUrls = r2Processor.getImageUrls(
+        photo.original_path,
+        photo.compressed_path,
+        photo.thumbnail_path
+      );
+      publicUrl = imageUrls.compressedUrl;
+      thumbnailUrl = imageUrls.thumbnailUrl;
+      originalUrl = imageUrls.originalUrl;
+    } else {
+      // Legacy KV photo - use old URL format
+      const { ImageProcessor } = await import('../lib/image-processor');
+      const imageProcessor = new ImageProcessor(c.env);
+      publicUrl = imageProcessor.getPublicUrl(photo.compressed_path);
+    }
     
     return c.json({
       success: true,
@@ -481,9 +559,14 @@ router.get('/:photoId', async (c) => {
         itemId: photo.item_id,
         filename: photo.filename,
         size: photo.size,
-        publicUrl,
+        width: photo.width,
+        height: photo.height,
+        url: publicUrl,
+        thumbnailUrl,
+        originalUrl,
         compressedPath: photo.compressed_path,
         originalPath: photo.original_path,
+        thumbnailPath: photo.thumbnail_path,
         createdAt: photo.created_at
       }
     });

@@ -261,7 +261,57 @@ class ApiClient {
     }
   }
 
-  // Admin API - Upload both original and processed photo
+  // Admin API - Upload photo variants to R2 (original, compressed, thumbnail)
+  async uploadPhotoR2(itemId: string, variants: {
+    original: File;
+    compressed: File;
+    thumbnail: File;
+    width: number;
+    height: number;
+  }): Promise<ApiResponse<{
+    id: string;
+    url: string;
+    thumbnailUrl: string;
+    filename: string;
+  }>> {
+    const formData = new FormData();
+    formData.append('original', variants.original);
+    formData.append('compressed', variants.compressed);
+    formData.append('thumbnail', variants.thumbnail);
+    formData.append('width', variants.width.toString());
+    formData.append('height', variants.height.toString());
+
+    const config: RequestInit = {
+      method: 'POST',
+      body: formData,
+    };
+
+    // Add auth header but don't set Content-Type (browser will set it with boundary for FormData)
+    if (this.sessionToken) {
+      config.headers = {
+        'Authorization': `Bearer ${this.sessionToken}`,
+      };
+    }
+
+    try {
+      const response = await fetch(`${this.baseUrl}/admin/photos/item/${itemId}/upload`, config);
+      const data = await response.json();
+      
+      if (!response.ok) {
+        throw new Error(data.error || `HTTP ${response.status}`);
+      }
+      
+      return data;
+    } catch (error) {
+      console.error('R2 photo upload failed:', error);
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Upload failed'
+      };
+    }
+  }
+
+  // Admin API - Upload both original and processed photo (DEPRECATED - use uploadPhotoR2)
   async uploadPhotoBoth(itemId: string, originalFile: File, processedFile: File): Promise<ApiResponse<{
     id: string;
     publicUrl: string;
