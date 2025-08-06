@@ -196,6 +196,10 @@ class ApiClient {
   }
 
   // Admin API - Items
+  async getAdminItems(): Promise<ApiResponse<CollectorItem[]>> {
+    return this.request('/admin/items');
+  }
+
   async createItem(item: Omit<CollectorItem, 'id' | 'createdAt' | 'updatedAt' | 'photos'>): Promise<ApiResponse<{ id: string }>> {
     return this.request('/admin/items', {
       method: 'POST',

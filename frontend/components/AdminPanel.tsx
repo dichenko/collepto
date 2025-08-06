@@ -71,21 +71,27 @@ export function AdminPanel() {
     setError(null);
     
     try {
-      // В админке используем обычные публичные API для начала
+      // В админке используем админские API для получения полных данных
       const [itemsResponse, blogResponse] = await Promise.all([
-        apiClient.getItems(),
+        apiClient.getAdminItems(),
         apiClient.getBlogPosts()
       ]);
 
       if (itemsResponse.success && itemsResponse.data) {
         setItems(itemsResponse.data);
+      } else {
+        console.error('Items loading error:', itemsResponse.error);
+        setError(`Ошибка загрузки предметов: ${itemsResponse.error}`);
       }
 
       if (blogResponse.success && blogResponse.data) {
         setBlogPosts(blogResponse.data);
+      } else {
+        console.error('Blog posts loading error:', blogResponse.error);
       }
     } catch (error) {
-      setError('Ошибка загрузки данных');
+      console.error('Data loading error:', error);
+      setError('Ошибка загрузки данных: ' + (error instanceof Error ? error.message : 'Неизвестная ошибка'));
     } finally {
       setIsLoading(false);
     }
