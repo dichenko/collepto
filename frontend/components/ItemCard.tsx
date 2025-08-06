@@ -121,7 +121,16 @@ export function ItemCard({
         </div>
       </CardContent>
 
-
+      <CardFooter className="p-4 pt-0">
+        <Button
+          variant="outline"
+          size="sm"
+          className="w-full gap-2"
+        >
+          <MoreHorizontal className="w-4 h-4" />
+          Подробнее
+        </Button>
+      </CardFooter>
     </Card>
   );
 }

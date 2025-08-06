@@ -67,6 +67,16 @@ export function ItemPage() {
     navigate('/');
   };
 
+  const handleTagClick = (tag: string) => {
+    // Navigate to collection page with tag filter
+    navigate(`/?tag=${encodeURIComponent(tag)}`);
+  };
+
+  const handleCategoryClick = (category: string) => {
+    // Navigate to collection page with category filter
+    navigate(`/?category=${encodeURIComponent(category)}`);
+  };
+
   if (isLoading) {
     return (
       <div className="min-h-screen bg-background flex items-center justify-center">
@@ -109,6 +119,8 @@ export function ItemPage() {
         <ItemView 
           item={item} 
           onBack={handleBack}
+          onTagClick={handleTagClick}
+          onCategoryClick={handleCategoryClick}
         />
       </div>
     </div>

@@ -31,7 +31,6 @@ export function SearchFilters({ onSearch, availableTags, availableCategories, in
   const [yearFrom, setYearFrom] = useState<string>(initialFilters?.yearFrom?.toString() || '');
   const [yearTo, setYearTo] = useState<string>(initialFilters?.yearTo?.toString() || '');
   const [selectedTags, setSelectedTags] = useState<string[]>(initialFilters?.tags || []);
-  const [selectedCategory, setSelectedCategory] = useState<string>(initialFilters?.category || '');
   const [isFiltersOpen, setIsFiltersOpen] = useState(false);
 
   // Update state when initialFilters changes
@@ -41,8 +40,7 @@ export function SearchFilters({ onSearch, availableTags, availableCategories, in
       setYearFrom(initialFilters.yearFrom?.toString() || '');
       setYearTo(initialFilters.yearTo?.toString() || '');
       setSelectedTags(initialFilters.tags || []);
-      setSelectedCategory(initialFilters.category || '');
-      if ((initialFilters.tags && initialFilters.tags.length > 0) || initialFilters.category) {
+      if (initialFilters.tags && initialFilters.tags.length > 0) {
         setIsFiltersOpen(true);
       }
     }
@@ -54,7 +52,7 @@ export function SearchFilters({ onSearch, availableTags, availableCategories, in
       yearFrom: yearFrom ? parseInt(yearFrom) : null,
       yearTo: yearTo ? parseInt(yearTo) : null,
       tags: selectedTags,
-      category: selectedCategory,
+      category: '',
     });
   };
 
@@ -71,7 +69,6 @@ export function SearchFilters({ onSearch, availableTags, availableCategories, in
     setYearFrom('');
     setYearTo('');
     setSelectedTags([]);
-    setSelectedCategory('');
     onSearch({
       title: '',
       yearFrom: null,
@@ -81,7 +78,7 @@ export function SearchFilters({ onSearch, availableTags, availableCategories, in
     });
   };
 
-  const hasActiveFilters = title || yearFrom || yearTo || selectedTags.length > 0 || selectedCategory;
+  const hasActiveFilters = title || yearFrom || yearTo || selectedTags.length > 0;
 
   return (
     <Card className="w-full">
@@ -106,7 +103,7 @@ export function SearchFilters({ onSearch, availableTags, availableCategories, in
                 Filters
                 {hasActiveFilters && (
                   <Badge variant="secondary" className="ml-1 px-1.5 py-0.5 text-xs">
-                    {[title && 'title', yearFrom && 'year', selectedTags.length && 'tags', selectedCategory && 'category'].filter(Boolean).length}
+                    {[title && 'title', yearFrom && 'year', selectedTags.length && 'tags'].filter(Boolean).length}
                   </Badge>
                 )}
               </Button>
@@ -157,40 +154,7 @@ export function SearchFilters({ onSearch, availableTags, availableCategories, in
               </div>
             </div>
 
-            {/* Category filter */}
-            <div className="space-y-2">
-              <Label>Filter by Category</Label>
-              <div className="flex flex-wrap gap-2">
-                {availableCategories.map((category) => (
-                  <Button
-                    key={category}
-                    variant={selectedCategory === category ? "default" : "outline"}
-                    size="sm"
-                    onClick={() => setSelectedCategory(selectedCategory === category ? '' : category)}
-                    className="h-auto py-1 px-3 text-sm transition-all duration-200 hover:scale-105 active:scale-95 active:transition-none"
-                  >
-                    {category}
-                    {selectedCategory === category && (
-                      <X className="w-3 h-3 ml-1" />
-                    )}
-                  </Button>
-                ))}
-              </div>
-              {selectedCategory && (
-                <div className="space-y-2">
-                  <Label>Selected Category:</Label>
-                  <Badge variant="secondary" className="gap-1">
-                    {selectedCategory}
-                    <button
-                      onClick={() => setSelectedCategory('')}
-                      className="hover:bg-secondary-foreground/20 rounded-full p-0.5"
-                    >
-                      <X className="w-3 h-3" />
-                    </button>
-                  </Badge>
-                </div>
-              )}
-            </div>
+
 
             {/* Tags filter */}
             <div className="space-y-2">
