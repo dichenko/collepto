@@ -1,4 +1,5 @@
 import type { Env, CollectorItem, BlogPost, PhotoAsset } from '../types';
+import { R2ImageProcessor } from '../lib/r2-image-processor';
 import { createSlug, extractIdFromSlug } from '../lib/slugify';
 
 export class DatabaseQueries {
@@ -28,12 +29,15 @@ export class DatabaseQueries {
       SELECT compressed_path, thumbnail_path FROM photo_assets WHERE item_id = ?
     `).bind(id).all();
     
+    // Use R2ImageProcessor to get proper URLs
+    const r2Processor = new R2ImageProcessor(this.env.PHOTOS_BUCKET, this.env.R2_PUBLIC_URL);
+    
     return {
       ...item,
       tags: JSON.parse(item.tags || '[]'),
       photos: photos.results?.map(p => {
-        // All photos are now in R2
-        return `/api/photos/r2/compressed/${p.compressed_path.split('/').pop()}`;
+        // Use R2ImageProcessor to get proper public URL
+        return r2Processor.getPublicUrl(p.compressed_path);
       }) || []
     } as CollectorItem;
   }

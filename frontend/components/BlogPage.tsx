@@ -4,6 +4,7 @@ import { Button } from './ui/button';
 import { Badge } from './ui/badge';
 import { Calendar, Clock, ArrowRight, ChevronLeft, ChevronRight } from 'lucide-react';
 import { ImageWithFallback } from './figma/ImageWithFallback';
+import { getImageUrl } from '../utils/api';
 
 interface CollectorItem {
   id: string;
@@ -114,7 +115,7 @@ export function BlogPage({ items, blogPosts, onItemClick, onPostClick }: BlogPag
                         >
                           <div className="relative aspect-[4/3] overflow-hidden rounded-lg">
                             <ImageWithFallback
-                              src={item.photos[0]}
+                              src={getImageUrl(item.photos[0])}
                               alt={item.title}
                               className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-300"
                             />

@@ -88,10 +88,11 @@ export function CollectionPage() {
     // Filter by title
     if (filters.title) {
       const titleLower = filters.title.toLowerCase();
-      filtered = filtered.filter(item => 
-        item.title.toLowerCase().includes(titleLower) ||
-        item.description.toLowerCase().includes(titleLower)
-      );
+      filtered = filtered.filter(item => {
+        if (!item) return false;
+        return (item.title || '').toLowerCase().includes(titleLower) ||
+               (item.description || '').toLowerCase().includes(titleLower);
+      });
     }
 
     // Filter by year range
@@ -199,6 +200,7 @@ export function CollectionPage() {
             availableCategories={getAllCategories()}
             onSearch={handleSearch}
             initialFilters={currentFilters}
+            instantSearch={true}
           />
 
           {/* Results count */}

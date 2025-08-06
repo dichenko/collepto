@@ -1,6 +1,28 @@
 // API client for Collepto backend
 const API_BASE_URL = 'https://collepto.3451881.workers.dev/api';
 
+// Helper function to get full image URL
+// Note: Backend now returns full URLs, so this function is mostly for backwards compatibility
+export const getImageUrl = (photoPath: string): string => {
+  if (!photoPath) return '';
+  
+  // If already a full URL, return as is
+  if (photoPath.startsWith('http://') || photoPath.startsWith('https://')) {
+    return photoPath;
+  }
+  
+  // For backwards compatibility with relative URLs
+  const BASE_URL = 'https://collepto.3451881.workers.dev';
+  
+  // If starts with /api or any /, use base URL
+  if (photoPath.startsWith('/')) {
+    return `${BASE_URL}${photoPath}`;
+  }
+  
+  // Otherwise, assume it's an API path
+  return `${BASE_URL}/api/${photoPath}`;
+};
+
 export interface CollectorItem {
   id: string;
   title: string;
@@ -351,9 +373,17 @@ class ApiClient {
     }
   }
 
-  async deletePhoto(photoId: string): Promise<ApiResponse<{ id: string }>> {
-    return this.request(`/admin/photos/${photoId}`, {
+  async deletePhoto(itemId: string, photoUrl: string): Promise<ApiResponse<{ id: string }>> {
+    return this.request(`/admin/items/${itemId}/photos`, {
       method: 'DELETE',
+      body: JSON.stringify({ photoUrl }),
+    });
+  }
+
+  async reorderPhotos(itemId: string, photoUrls: string[]): Promise<ApiResponse<{ success: boolean }>> {
+    return this.request(`/admin/items/${itemId}/photos/reorder`, {
+      method: 'POST',
+      body: JSON.stringify({ photoUrls }),
     });
   }
 

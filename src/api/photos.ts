@@ -15,7 +15,7 @@ router.get('/item/:itemId', async (c) => {
     const photos = await db.getPhotosByItemId(itemId);
     
     // Convert to format expected by PhotoUploader with public URLs
-    const r2Processor = new R2ImageProcessor(c.env.PHOTOS_BUCKET);
+    const r2Processor = new R2ImageProcessor(c.env.PHOTOS_BUCKET, c.env.R2_PUBLIC_URL);
     const photosWithUrls = photos.map(photo => {
       // All photos are now in R2
       const imageUrls = r2Processor.getImageUrls(
@@ -120,7 +120,7 @@ router.post('/item/:itemId/upload', async (c) => {
     ];
 
     // Save to R2
-    const r2Processor = new R2ImageProcessor(c.env.PHOTOS_BUCKET);
+    const r2Processor = new R2ImageProcessor(c.env.PHOTOS_BUCKET, c.env.R2_PUBLIC_URL);
     const processedData = await r2Processor.saveProcessedImages(variants);
     
     // Update with actual dimensions
@@ -245,7 +245,7 @@ router.post('/item/:itemId/upload-multiple', async (c) => {
     }
 
     // Process all images
-    const r2Processor = new R2ImageProcessor(c.env.PHOTOS_BUCKET);
+    const r2Processor = new R2ImageProcessor(c.env.PHOTOS_BUCKET, c.env.R2_PUBLIC_URL);
     const results = [];
     const errors = [];
 
@@ -310,6 +310,111 @@ router.post('/item/:itemId/upload-multiple', async (c) => {
   }
 });
 
+// POST upload-both (compatibility endpoint for old frontend)
+router.post('/item/:itemId/upload-both', async (c) => {
+  try {
+    const itemId = c.req.param('itemId');
+    
+    // Check if item exists
+    const db = new DatabaseQueries(c.env);
+    const item = await db.getItemById(itemId);
+    if (!item) {
+      return c.json({ success: false, error: 'Item not found' }, 404);
+    }
+
+    // Check photo limit (10 photos max per item)
+    const existingPhotos = await db.getPhotosByItemId(itemId);
+    if (existingPhotos.length >= 10) {
+      return c.json({ 
+        success: false, 
+        error: 'Maximum 10 photos allowed per item' 
+      }, 400);
+    }
+
+    // Get uploaded files (old frontend sends original and processed)
+    const formData = await c.req.formData();
+    const originalFile = formData.get('original') as File;
+    const processedFile = formData.get('processed') as File;
+    
+    if (!originalFile || !processedFile) {
+      return c.json({ 
+        success: false, 
+        error: 'Missing files. Expected original and processed files.' 
+      }, 400);
+    }
+
+    // Validate files
+    const validationResults = [
+      { file: originalFile, name: 'original' },
+      { file: processedFile, name: 'processed' }
+    ].map(({ file, name }) => ({ 
+      name, 
+      validation: validateImageFile(file) 
+    }));
+
+    const invalidFiles = validationResults.filter(r => !r.validation.valid);
+    if (invalidFiles.length > 0) {
+      return c.json({ 
+        success: false, 
+        error: `Invalid files: ${invalidFiles.map(f => `${f.name}: ${f.validation.error}`).join(', ')}` 
+      }, 400);
+    }
+
+    // For compatibility, create a simple thumbnail from the processed file
+    // We'll store: original, processed (as compressed), processed (as thumbnail)
+    const variants: ImageVariant[] = [
+      { file: originalFile, path: '', variant: 'original' },
+      { file: processedFile, path: '', variant: 'compressed' },
+      { file: processedFile, path: '', variant: 'thumbnail' } // Same as compressed for now
+    ];
+
+    // Save to R2
+    const r2Processor = new R2ImageProcessor(c.env.PHOTOS_BUCKET, c.env.R2_PUBLIC_URL);
+    const processedData = await r2Processor.saveProcessedImages(variants);
+    
+    // Get image dimensions from processed file (estimate)
+    processedData.width = 1920; // Default assumption
+    processedData.height = 1080;
+
+    // Save to database
+    const photoId = await db.createPhotoAsset({
+      itemId,
+      originalPath: processedData.originalPath,
+      compressedPath: processedData.compressedPath,
+      thumbnailPath: processedData.thumbnailPath,
+      filename: processedData.filename,
+      size: processedData.size,
+      width: processedData.width,
+      height: processedData.height
+    });
+
+    // Get URLs for response
+    const imageUrls = r2Processor.getImageUrls(
+      processedData.originalPath,
+      processedData.compressedPath,
+      processedData.thumbnailPath
+    );
+
+    // Return in old format for compatibility
+    return c.json({
+      success: true,
+      data: {
+        id: photoId,
+        url: imageUrls.compressedUrl,
+        publicUrl: imageUrls.compressedUrl, // Old field name
+        filename: processedData.filename
+      }
+    }, 201);
+
+  } catch (error) {
+    console.error('Upload both photos error:', error);
+    return c.json({ 
+      success: false, 
+      error: error instanceof Error ? error.message : 'Failed to upload photos' 
+    }, 500);
+  }
+});
+
 // DELETE photo
 router.delete('/:photoId', async (c) => {
   try {
@@ -324,7 +429,7 @@ router.delete('/:photoId', async (c) => {
     }
 
     // Delete files from R2 storage
-    const r2Processor = new R2ImageProcessor(c.env.PHOTOS_BUCKET);
+    const r2Processor = new R2ImageProcessor(c.env.PHOTOS_BUCKET, c.env.R2_PUBLIC_URL);
     await r2Processor.deleteFiles({
       original: photo.originalPath,
       compressed: photo.compressedPath,
@@ -515,7 +620,7 @@ router.get('/:photoId', async (c) => {
     }
     
     // Generate R2 URLs for all photos
-    const r2Processor = new R2ImageProcessor(c.env.PHOTOS_BUCKET);
+    const r2Processor = new R2ImageProcessor(c.env.PHOTOS_BUCKET, c.env.R2_PUBLIC_URL);
     const imageUrls = r2Processor.getImageUrls(
       photo.original_path,
       photo.compressed_path,

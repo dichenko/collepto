@@ -5,6 +5,7 @@ import { Badge } from './ui/badge';
 import { ArrowLeft, Calendar, Award, DollarSign, MapPin, ChevronLeft, ChevronRight } from 'lucide-react';
 import { ImageWithFallback } from './figma/ImageWithFallback';
 import { PhotoGallery } from './PhotoGallery';
+import { getImageUrl } from '../utils/api';
 
 interface CollectorItem {
   id: string;
@@ -51,7 +52,7 @@ export function ItemView({ item, onBack, onTagClick, onCategoryClick }: ItemView
         <div className="space-y-4">
           <div className="relative aspect-square overflow-hidden rounded-md">
             <ImageWithFallback
-              src={item.photos.length > 0 ? item.photos[currentImageIndex] : '/placeholder-image.jpg'}
+              src={item.photos.length > 0 ? getImageUrl(item.photos[currentImageIndex]) : '/placeholder-image.jpg'}
               alt={item.title}
               className="w-full h-full object-cover"
             />
@@ -123,7 +124,7 @@ export function ItemView({ item, onBack, onTagClick, onCategoryClick }: ItemView
                   }`}
                 >
                   <ImageWithFallback
-                    src={photo}
+                    src={getImageUrl(photo)}
                     alt={`${item.title} - изображение ${index + 1}`}
                     className="w-full h-full object-cover"
                   />

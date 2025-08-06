@@ -3,6 +3,7 @@ import { Button } from './ui/button';
 import { Dialog, DialogContent, DialogClose } from './ui/dialog';
 import { ChevronLeft, ChevronRight, X } from 'lucide-react';
 import { ImageWithFallback } from './figma/ImageWithFallback';
+import { getImageUrl } from '../utils/api';
 
 interface PhotoGalleryProps {
   photos: string[];
@@ -63,7 +64,7 @@ export function PhotoGallery({ photos, itemTitle }: PhotoGalleryProps) {
             onClick={() => openGallery(0)}
           >
             <ImageWithFallback
-              src={photos[0]}
+              src={getImageUrl(photos[0])}
               alt={`${itemTitle} - фото 1`}
               className="w-full h-full object-cover transition-transform group-hover:scale-105"
             />
@@ -83,7 +84,7 @@ export function PhotoGallery({ photos, itemTitle }: PhotoGalleryProps) {
                 onClick={() => openGallery(index)}
               >
                 <ImageWithFallback
-                  src={photo}
+                  src={getImageUrl(photo)}
                   alt={`${itemTitle} - фото ${index + 1}`}
                   className="w-full h-full object-cover transition-transform group-hover:scale-105"
                 />
@@ -101,7 +102,7 @@ export function PhotoGallery({ photos, itemTitle }: PhotoGalleryProps) {
                 onClick={() => openGallery(index)}
               >
                 <ImageWithFallback
-                  src={photo}
+                  src={getImageUrl(photo)}
                   alt={`${itemTitle} - фото ${index + 1}`}
                   className="w-full h-full object-cover transition-transform group-hover:scale-105"
                 />
@@ -167,7 +168,7 @@ export function PhotoGallery({ photos, itemTitle }: PhotoGalleryProps) {
             {selectedIndex !== null && (
               <div className="relative max-w-full max-h-full">
                 <ImageWithFallback
-                  src={photos[selectedIndex]}
+                  src={getImageUrl(photos[selectedIndex])}
                   alt={`${itemTitle} - фото ${selectedIndex + 1}`}
                   className="max-w-full max-h-[90vh] object-contain"
                 />

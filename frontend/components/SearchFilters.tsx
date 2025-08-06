@@ -24,9 +24,11 @@ interface SearchFiltersProps {
     tags?: string[];
     category?: string;
   };
+  // Новый параметр для включения мгновенного поиска
+  instantSearch?: boolean;
 }
 
-export function SearchFilters({ onSearch, availableTags, availableCategories, initialFilters }: SearchFiltersProps) {
+export function SearchFilters({ onSearch, availableTags, availableCategories, initialFilters, instantSearch = false }: SearchFiltersProps) {
   const [title, setTitle] = useState(initialFilters?.title || '');
   const [yearFrom, setYearFrom] = useState<string>(initialFilters?.yearFrom?.toString() || '');
   const [yearTo, setYearTo] = useState<string>(initialFilters?.yearTo?.toString() || '');
@@ -45,6 +47,19 @@ export function SearchFilters({ onSearch, availableTags, availableCategories, in
       }
     }
   }, [initialFilters]);
+
+  // Мгновенный поиск при изменении фильтров
+  useEffect(() => {
+    if (instantSearch) {
+      onSearch({
+        title,
+        yearFrom: yearFrom ? parseInt(yearFrom) : null,
+        yearTo: yearTo ? parseInt(yearTo) : null,
+        tags: selectedTags,
+        category: '',
+      });
+    }
+  }, [title, yearFrom, yearTo, selectedTags, instantSearch, onSearch]);
 
   const handleSearch = () => {
     onSearch({
@@ -69,13 +84,15 @@ export function SearchFilters({ onSearch, availableTags, availableCategories, in
     setYearFrom('');
     setYearTo('');
     setSelectedTags([]);
-    onSearch({
-      title: '',
-      yearFrom: null,
-      yearTo: null,
-      tags: [],
-      category: '',
-    });
+    if (!instantSearch) {
+      onSearch({
+        title: '',
+        yearFrom: null,
+        yearTo: null,
+        tags: [],
+        category: '',
+      });
+    }
   };
 
   const hasActiveFilters = title || yearFrom || yearTo || selectedTags.length > 0;
@@ -88,11 +105,11 @@ export function SearchFilters({ onSearch, availableTags, availableCategories, in
           <div className="flex-1 relative">
             <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-muted-foreground w-4 h-4" />
             <Input
-              placeholder="Search by title..."
+              placeholder={instantSearch ? "Поиск по названию и описанию..." : "Search by title..."}
               value={title}
               onChange={(e) => setTitle(e.target.value)}
               className="pl-10"
-              onKeyPress={(e) => e.key === 'Enter' && handleSearch()}
+              onKeyPress={(e) => !instantSearch && e.key === 'Enter' && handleSearch()}
             />
           </div>
           
@@ -110,10 +127,12 @@ export function SearchFilters({ onSearch, availableTags, availableCategories, in
             </CollapsibleTrigger>
           </Collapsible>
 
-          <Button onClick={handleSearch} className="gap-2">
-            <Search className="w-4 h-4" />
-            Search
-          </Button>
+          {!instantSearch && (
+            <Button onClick={handleSearch} className="gap-2">
+              <Search className="w-4 h-4" />
+              Search
+            </Button>
+          )}
 
           {hasActiveFilters && (
             <Button variant="outline" onClick={handleClearFilters} className="gap-2">

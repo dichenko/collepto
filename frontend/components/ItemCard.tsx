@@ -5,7 +5,7 @@ import { Badge } from './ui/badge';
 import { MoreHorizontal } from 'lucide-react';
 import { ImageWithFallback } from './figma/ImageWithFallback';
 
-import { type CollectorItem } from '../utils/api';
+import { type CollectorItem, getImageUrl } from '../utils/api';
 
 interface ItemCardProps {
   item: CollectorItem;
@@ -43,7 +43,7 @@ export function ItemCard({
           }}
         >
           <ImageWithFallback
-            src={item.photos.length > 0 ? (item.photos[currentImageIndex] || item.photos[0]) : '/placeholder-image.jpg'}
+            src={item.photos.length > 0 ? getImageUrl(item.photos[currentImageIndex] || item.photos[0]) : '/placeholder-image.jpg'}
             alt={item.title}
             className="w-full h-full object-cover transition-all duration-300"
           />

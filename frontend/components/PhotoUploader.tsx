@@ -10,10 +10,13 @@ import {
   Image as ImageIcon, 
   AlertCircle, 
   CheckCircle,
-  Loader2
+  Loader2,
+  GripVertical,
+  Trash2,
+  Eye
 } from 'lucide-react';
 import { ImageWithFallback } from './figma/ImageWithFallback';
-import apiClient from '../utils/api';
+import apiClient, { getImageUrl } from '../utils/api';
 
 interface PhotoUploaderProps {
   itemId: string;
@@ -44,6 +47,8 @@ export function PhotoUploader({
   const [isDragOver, setIsDragOver] = useState(false);
   const [uploadingFiles, setUploadingFiles] = useState<UploadingFile[]>([]);
   const [error, setError] = useState<string | null>(null);
+  const [draggedPhotoIndex, setDraggedPhotoIndex] = useState<number | null>(null);
+  const [deletingPhotoId, setDeletingPhotoId] = useState<string | null>(null);
 
   // Check if we can upload more photos
   const canUploadMore = existingPhotos.length + uploadingFiles.filter(f => f.status === 'success').length < maxPhotos;
@@ -295,6 +300,77 @@ export function PhotoUploader({
     });
   }, [itemId, remainingSlots, maxPhotos]);
 
+  // Delete existing photo
+  const handleDeletePhoto = async (photoId: string, photoUrl: string) => {
+    if (deletingPhotoId) return; // Prevent multiple deletions
+    
+    setDeletingPhotoId(photoId);
+    setError(null);
+
+    try {
+      const response = await apiClient.deletePhoto(itemId, photoUrl);
+      if (response.success) {
+        onPhotosUpdated?.();
+      } else {
+        setError(response.error || 'Ошибка удаления фото');
+      }
+    } catch (error) {
+      setError('Ошибка удаления фото');
+    } finally {
+      setDeletingPhotoId(null);
+    }
+  };
+
+  // Handle drag start for photo reordering
+  const handlePhotoDragStart = (e: React.DragEvent, index: number) => {
+    setDraggedPhotoIndex(index);
+    e.dataTransfer.effectAllowed = 'move';
+  };
+
+  // Handle drag over for photo reordering
+  const handlePhotoDragOver = (e: React.DragEvent, index: number) => {
+    e.preventDefault();
+    if (draggedPhotoIndex === null || draggedPhotoIndex === index) return;
+    
+    // Visual feedback could be added here
+    e.dataTransfer.dropEffect = 'move';
+  };
+
+  // Handle drop for photo reordering
+  const handlePhotoDrop = async (e: React.DragEvent, dropIndex: number) => {
+    e.preventDefault();
+    
+    if (draggedPhotoIndex === null || draggedPhotoIndex === dropIndex) {
+      setDraggedPhotoIndex(null);
+      return;
+    }
+
+    try {
+      // Create new order array
+      const newPhotos = [...existingPhotos];
+      const draggedPhoto = newPhotos[draggedPhotoIndex];
+      
+      // Remove from old position
+      newPhotos.splice(draggedPhotoIndex, 1);
+      // Insert at new position
+      newPhotos.splice(dropIndex, 0, draggedPhoto);
+      
+      // Update photo order on server
+      const photoUrls = newPhotos.map(photo => photo.url);
+      const response = await apiClient.reorderPhotos(itemId, photoUrls);
+      
+      if (response.success) {
+        onPhotosUpdated?.();
+      } else {
+        setError(response.error || 'Ошибка изменения порядка фото');
+      }
+    } catch (error) {
+      setError('Ошибка изменения порядка фото');
+    } finally {
+      setDraggedPhotoIndex(null);
+    }
+  };
+
   const handleDragOver = useCallback((e: React.DragEvent) => {
     e.preventDefault();
     setIsDragOver(true);
@@ -329,21 +405,7 @@ export function PhotoUploader({
     uploadFile(file);
   };
 
-  const handleDeletePhoto = async (photoId: string) => {
-    try {
-      setError(null);
-      const response = await apiClient.deletePhoto(photoId);
-      
-      if (response.success) {
-        // Call callback to refresh parent component
-        onPhotosUpdated?.();
-      } else {
-        setError(response.error || 'Ошибка удаления фото');
-      }
-    } catch (error) {
-      setError(error instanceof Error ? error.message : 'Ошибка удаления фото');
-    }
-  };
+
 
   return (
     <div className="space-y-4">
@@ -493,27 +555,68 @@ export function PhotoUploader({
         <div className="space-y-3">
           <div className="flex items-center justify-between">
             <h4 className="font-medium">Загруженные фото ({existingPhotos.length})</h4>
-            <Badge variant="secondary">{existingPhotos.length}/{maxPhotos}</Badge>
+            <div className="flex items-center gap-2">
+              <Badge variant="secondary">{existingPhotos.length}/{maxPhotos}</Badge>
+              <span className="text-xs text-muted-foreground">Перетаскивайте для изменения порядка</span>
+            </div>
           </div>
           
           <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
-            {existingPhotos.map((photo) => (
-              <div key={photo.id} className="relative group">
-                <div className="aspect-square overflow-hidden rounded-lg">
+            {existingPhotos.map((photo, index) => (
+              <div 
+                key={photo.id} 
+                className={`relative group cursor-move transition-all ${
+                  draggedPhotoIndex === index ? 'opacity-50 scale-95' : ''
+                }`}
+                draggable
+                onDragStart={(e) => handlePhotoDragStart(e, index)}
+                onDragOver={(e) => handlePhotoDragOver(e, index)}
+                onDrop={(e) => handlePhotoDrop(e, index)}
+              >
+                {/* Drag Handle */}
+                <div className="absolute top-2 left-2 z-10 opacity-0 group-hover:opacity-100 transition-opacity">
+                  <div className="bg-black/70 text-white p-1 rounded">
+                    <GripVertical className="w-3 h-3" />
+                  </div>
+                </div>
+
+                {/* Photo Number Badge */}
+                <div className="absolute top-2 right-2 z-10">
+                  <Badge variant="secondary" className="text-xs">
+                    {index + 1}
+                  </Badge>
+                </div>
+
+                <div className="aspect-square overflow-hidden rounded-lg border-2 border-transparent hover:border-primary/50 transition-colors">
                   <ImageWithFallback
-                    src={photo.url}
+                    src={getImageUrl(photo.url)}
                     alt={photo.filename}
                     className="w-full h-full object-cover"
                   />
                 </div>
-                <div className="absolute inset-0 bg-black/0 group-hover:bg-black/40 transition-colors rounded-lg flex items-center justify-center">
+                
+                {/* Action Buttons */}
+                <div className="absolute inset-0 bg-black/0 group-hover:bg-black/40 transition-colors rounded-lg flex items-center justify-center gap-2">
+                  <Button
+                    variant="secondary"
+                    size="sm"
+                    className="opacity-0 group-hover:opacity-100 transition-opacity bg-white/90 hover:bg-white text-black"
+                    onClick={() => window.open(getImageUrl(photo.url), '_blank')}
+                  >
+                    <Eye className="w-4 h-4" />
+                  </Button>
                   <Button
                     variant="destructive"
                     size="sm"
                     className="opacity-0 group-hover:opacity-100 transition-opacity"
-                    onClick={() => handleDeletePhoto(photo.id)}
+                    onClick={() => handleDeletePhoto(photo.id, photo.url)}
+                    disabled={deletingPhotoId === photo.id}
                   >
-                    <X className="w-4 h-4" />
+                    {deletingPhotoId === photo.id ? (
+                      <Loader2 className="w-4 h-4 animate-spin" />
+                    ) : (
+                      <Trash2 className="w-4 h-4" />
+                    )}
                   </Button>
                 </div>
               </div>

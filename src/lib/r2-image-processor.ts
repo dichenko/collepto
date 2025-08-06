@@ -16,9 +16,12 @@ export interface ImageVariant {
 
 export class R2ImageProcessor {
   private bucket: R2Bucket;
+  private baseUrl: string;
 
-  constructor(bucket: R2Bucket) {
+  constructor(bucket: R2Bucket, baseUrl?: string) {
     this.bucket = bucket;
+    // Use provided baseUrl or fallback to hardcoded R2 URL
+    this.baseUrl = baseUrl || 'https://pub-b8b2a61ea8f94c7580a7e39b14a08c8b.r2.dev';
   }
 
   /**
@@ -79,8 +82,8 @@ export class R2ImageProcessor {
    * Получает публичный URL для файла в R2
    */
   getPublicUrl(path: string): string {
-    // Cloudflare R2 публичный URL
-    return `https://pub-b8b2a61ea8f94c7580a7e39b14a08c8b.r2.dev/${path}`;
+    // Use configured base URL for R2 public access
+    return `${this.baseUrl}/${path}`;
   }
 
   /**

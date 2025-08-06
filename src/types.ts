@@ -1,10 +1,13 @@
 export interface Env {
   DB: D1Database;
+  ASSETS: Fetcher;
   SESSIONS: KVNamespace;
   PHOTOS_BUCKET: R2Bucket;
   ADMIN_USERNAME: string;
   ADMIN_PASSWORD: string;
   JWT_SECRET: string;
+  BASE_URL: string;
+  R2_PUBLIC_URL: string;
   ENVIRONMENT?: string;
 }
 
