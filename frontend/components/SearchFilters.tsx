@@ -81,7 +81,7 @@ export function SearchFilters({ onSearch, availableTags, availableCategories, in
   const hasActiveFilters = title || yearFrom || yearTo || selectedTags.length > 0;
 
   return (
-    <Card className="w-full">
+    <Card className="w-full card-refined">
       <CardContent className="p-6 space-y-4">
         {/* Main search bar */}
         <div className="flex gap-3">

@@ -31,10 +31,10 @@ export function ItemCard({
     setCurrentImageIndex(Math.max(0, Math.min(index, item.photos.length - 1)));
   };
   return (
-    <Card className="h-full flex flex-col transition-all duration-200 hover:shadow-lg">
+    <Card className="h-full flex flex-col card-refined">
       <CardHeader className="p-0">
         <div 
-          className="relative aspect-[4/3] overflow-hidden rounded-t-lg cursor-pointer"
+          className="relative aspect-[4/3] overflow-hidden rounded-t-md cursor-pointer"
           onMouseMove={handleMouseMove}
           onMouseEnter={() => setIsHovering(true)}
           onMouseLeave={() => {
@@ -125,7 +125,7 @@ export function ItemCard({
         <Button
           variant="outline"
           size="sm"
-          className="w-full gap-2"
+          className="w-full gap-2 btn-refined"
         >
           <MoreHorizontal className="w-4 h-4" />
           Подробнее

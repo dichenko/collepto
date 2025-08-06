@@ -49,7 +49,7 @@ export function ItemView({ item, onBack, onTagClick, onCategoryClick }: ItemView
       <div className="grid lg:grid-cols-2 gap-8">
         {/* Image Section */}
         <div className="space-y-4">
-          <div className="relative aspect-square overflow-hidden rounded-lg">
+          <div className="relative aspect-square overflow-hidden rounded-md">
             <ImageWithFallback
               src={item.photos.length > 0 ? item.photos[currentImageIndex] : '/placeholder-image.jpg'}
               alt={item.title}
@@ -116,7 +116,7 @@ export function ItemView({ item, onBack, onTagClick, onCategoryClick }: ItemView
                 <button
                   key={index}
                   onClick={() => setCurrentImageIndex(index)}
-                  className={`relative aspect-square overflow-hidden rounded-lg transition-all duration-200 ${
+                  className={`relative aspect-square overflow-hidden rounded-md transition-all duration-200 ${
                     index === currentImageIndex 
                       ? 'ring-2 ring-primary scale-105' 
                       : 'hover:scale-105 opacity-70 hover:opacity-100'
@@ -134,7 +134,7 @@ export function ItemView({ item, onBack, onTagClick, onCategoryClick }: ItemView
 
           {/* Quick Info Cards */}
           <div className="grid grid-cols-2 gap-4">
-            <Card className="p-4">
+            <Card className="p-4 card-refined">
               <div className="flex items-center gap-3">
                 <Calendar className="w-5 h-5 text-primary" />
                 <div>
@@ -145,7 +145,7 @@ export function ItemView({ item, onBack, onTagClick, onCategoryClick }: ItemView
             </Card>
 
             {item.condition && (
-              <Card className="p-4">
+              <Card className="p-4 card-refined">
                 <div className="flex items-center gap-3">
                   <Award className="w-5 h-5 text-primary" />
                   <div>
@@ -157,7 +157,7 @@ export function ItemView({ item, onBack, onTagClick, onCategoryClick }: ItemView
             )}
 
             {item.value && (
-              <Card className="p-4">
+              <Card className="p-4 card-refined">
                 <div className="flex items-center gap-3">
                   <DollarSign className="w-5 h-5 text-primary" />
                   <div>
@@ -169,7 +169,7 @@ export function ItemView({ item, onBack, onTagClick, onCategoryClick }: ItemView
             )}
 
             {item.acquisition && (
-              <Card className="p-4">
+              <Card className="p-4 card-refined">
                 <div className="flex items-center gap-3">
                   <MapPin className="w-5 h-5 text-primary" />
                   <div>
