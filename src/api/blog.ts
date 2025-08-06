@@ -35,6 +35,36 @@ router.get('/', async (c) => {
   }
 });
 
+// GET blog post by slug (public)
+router.get('/slug/:slug', async (c) => {
+  try {
+    const slug = c.req.param('slug');
+    const db = new DatabaseQueries(c.env);
+    let post = await db.getBlogPostBySlug(slug);
+    
+    // If not found by slug, try to extract ID from slug and search by ID prefix
+    if (!post) {
+      const { extractIdFromSlug } = await import('../lib/slugify');
+      const idPrefix = extractIdFromSlug(slug);
+      if (idPrefix) {
+        post = await db.findBlogPostByIdPrefix(idPrefix);
+      }
+    }
+    
+    if (!post) {
+      return c.json({ success: false, error: 'Blog post not found' }, 404);
+    }
+    
+    return c.json({
+      success: true,
+      data: post
+    });
+  } catch (error) {
+    console.error('Get blog post by slug error:', error);
+    return c.json({ success: false, error: 'Failed to fetch blog post' }, 500);
+  }
+});
+
 // GET blog post by ID (admin)
 router.get('/:id', async (c) => {
   try {

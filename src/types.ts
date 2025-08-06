@@ -26,6 +26,7 @@ export interface CollectorItem {
   condition?: string;
   acquisition?: string;
   value?: string;
+  slug?: string;
   photos: string[];
   createdAt: string;
   updatedAt: string;
@@ -41,6 +42,7 @@ export interface BlogPost {
   relatedItems: string[];
   category: string;
   published: boolean;
+  slug?: string;
   createdAt: string;
   updatedAt: string;
 }

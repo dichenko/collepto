@@ -1,4 +1,5 @@
 import type { Env, CollectorItem, BlogPost, PhotoAsset } from '../types';
+import { createSlug, extractIdFromSlug } from '../lib/slugify';
 
 export class DatabaseQueries {
   constructor(private env: Env) {}
@@ -37,6 +38,7 @@ export class DatabaseQueries {
   async createItem(item: Omit<CollectorItem, 'id' | 'createdAt' | 'updatedAt'>): Promise<string> {
     const id = crypto.randomUUID();
     const now = new Date().toISOString();
+    const slug = createSlug(item.title, id);
     
     // Helper function to convert empty strings and undefined to null
     const safeValue = (value: any) => (value === '' || value == null) ? null : value;
@@ -45,8 +47,8 @@ export class DatabaseQueries {
       INSERT INTO items (
         id, title, description, full_description, year, year_from, year_to,
         country, organization, size, edition, series, tags, category,
-        condition, acquisition, value, created_at, updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        condition, acquisition, value, slug, created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).bind(
       id, 
       item.title, // title is required, don't null it
@@ -65,6 +67,7 @@ export class DatabaseQueries {
       safeValue(item.condition), 
       safeValue(item.acquisition), 
       safeValue(item.value),
+      slug,
       now, now
     ).run();
     
@@ -92,6 +95,14 @@ export class DatabaseQueries {
     if (item.condition !== undefined) { fields.push('condition = ?'); values.push(item.condition); }
     if (item.acquisition !== undefined) { fields.push('acquisition = ?'); values.push(item.acquisition); }
     if (item.value !== undefined) { fields.push('value = ?'); values.push(item.value); }
+    if (item.slug !== undefined) { fields.push('slug = ?'); values.push(item.slug); }
+    
+    // If title is being updated, regenerate slug
+    if (item.title !== undefined) {
+      const newSlug = createSlug(item.title, id);
+      fields.push('slug = ?'); 
+      values.push(newSlug);
+    }
     
     fields.push('updated_at = ?');
     values.push(now);
@@ -142,16 +153,17 @@ export class DatabaseQueries {
   async createBlogPost(post: Omit<BlogPost, 'id' | 'createdAt' | 'updatedAt'>): Promise<string> {
     const id = crypto.randomUUID();
     const now = new Date().toISOString();
+    const slug = createSlug(post.title, id);
     
     await this.env.DB.prepare(`
       INSERT INTO blog_posts (
         id, title, excerpt, content, publish_date, read_time,
-        related_items, category, published, created_at, updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        related_items, category, published, slug, created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).bind(
       id, post.title, post.excerpt, post.content, post.publishDate,
       post.readTime, JSON.stringify(post.relatedItems), post.category,
-      post.published ? 1 : 0, now, now
+      post.published ? 1 : 0, slug, now, now
     ).run();
     
     return id;
@@ -170,6 +182,14 @@ export class DatabaseQueries {
     if (post.relatedItems !== undefined) { fields.push('related_items = ?'); values.push(JSON.stringify(post.relatedItems)); }
     if (post.category !== undefined) { fields.push('category = ?'); values.push(post.category); }
     if (post.published !== undefined) { fields.push('published = ?'); values.push(post.published ? 1 : 0); }
+    if (post.slug !== undefined) { fields.push('slug = ?'); values.push(post.slug); }
+    
+    // If title is being updated, regenerate slug
+    if (post.title !== undefined) {
+      const newSlug = createSlug(post.title, id);
+      fields.push('slug = ?'); 
+      values.push(newSlug);
+    }
     
     fields.push('updated_at = ?');
     values.push(now);
@@ -217,6 +237,73 @@ export class DatabaseQueries {
     `).bind(id).run();
     
     return result.changes > 0;
+  }
+
+  // Slug-based queries
+  async getItemBySlug(slug: string): Promise<CollectorItem | null> {
+    const item = await this.env.DB.prepare(`
+      SELECT * FROM items WHERE slug = ?
+    `).bind(slug).first();
+    
+    if (!item) return null;
+    
+    // Get photos
+    const photos = await this.env.DB.prepare(`
+      SELECT compressed_path FROM photo_assets WHERE item_id = ?
+    `).bind(item.id).all();
+    
+    return {
+      ...item,
+      tags: JSON.parse(item.tags || '[]'),
+      photos: photos.results?.map(p => p.compressed_path) || []
+    } as CollectorItem;
+  }
+
+  async getBlogPostBySlug(slug: string): Promise<BlogPost | null> {
+    const post = await this.env.DB.prepare(`
+      SELECT * FROM blog_posts WHERE slug = ?
+    `).bind(slug).first();
+    
+    if (!post) return null;
+    
+    return {
+      ...post,
+      relatedItems: JSON.parse(post.related_items || '[]'),
+      published: Boolean(post.published)
+    } as BlogPost;
+  }
+
+  async findItemByIdPrefix(idPrefix: string): Promise<CollectorItem | null> {
+    const item = await this.env.DB.prepare(`
+      SELECT * FROM items WHERE id LIKE ?
+    `).bind(`${idPrefix}%`).first();
+    
+    if (!item) return null;
+    
+    // Get photos
+    const photos = await this.env.DB.prepare(`
+      SELECT compressed_path FROM photo_assets WHERE item_id = ?
+    `).bind(item.id).all();
+    
+    return {
+      ...item,
+      tags: JSON.parse(item.tags || '[]'),
+      photos: photos.results?.map(p => p.compressed_path) || []
+    } as CollectorItem;
+  }
+
+  async findBlogPostByIdPrefix(idPrefix: string): Promise<BlogPost | null> {
+    const post = await this.env.DB.prepare(`
+      SELECT * FROM blog_posts WHERE id LIKE ?
+    `).bind(`${idPrefix}%`).first();
+    
+    if (!post) return null;
+    
+    return {
+      ...post,
+      relatedItems: JSON.parse(post.related_items || '[]'),
+      published: Boolean(post.published)
+    } as BlogPost;
   }
 
   // Session management

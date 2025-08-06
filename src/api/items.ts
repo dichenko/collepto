@@ -64,6 +64,36 @@ router.get('/:id', async (c) => {
   }
 });
 
+// GET item by slug (public)
+router.get('/slug/:slug', async (c) => {
+  try {
+    const slug = c.req.param('slug');
+    const db = new DatabaseQueries(c.env);
+    let item = await db.getItemBySlug(slug);
+    
+    // If not found by slug, try to extract ID from slug and search by ID prefix
+    if (!item) {
+      const { extractIdFromSlug } = await import('../lib/slugify');
+      const idPrefix = extractIdFromSlug(slug);
+      if (idPrefix) {
+        item = await db.findItemByIdPrefix(idPrefix);
+      }
+    }
+    
+    if (!item) {
+      return c.json({ success: false, error: 'Item not found' }, 404);
+    }
+    
+    return c.json({
+      success: true,
+      data: item
+    });
+  } catch (error) {
+    console.error('Get item by slug error:', error);
+    return c.json({ success: false, error: 'Failed to fetch item' }, 500);
+  }
+});
+
 // POST create new item
   router.post('/', async (c) => {
     try {

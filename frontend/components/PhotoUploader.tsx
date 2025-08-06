@@ -79,6 +79,82 @@ export function PhotoUploader({
     return null;
   };
 
+  // Client-side image processing
+  const processImage = async (file: File): Promise<File> => {
+    return new Promise((resolve, reject) => {
+      const img = new Image();
+      img.onload = () => {
+        try {
+          // Calculate new dimensions (max 1920px on longest side)
+          const maxSize = 1920;
+          let { width, height } = img;
+          
+          if (width > maxSize || height > maxSize) {
+            if (width > height) {
+              height = (height * maxSize) / width;
+              width = maxSize;
+            } else {
+              width = (width * maxSize) / height;
+              height = maxSize;
+            }
+          }
+
+          // Create canvas for resizing
+          const canvas = document.createElement('canvas');
+          const ctx = canvas.getContext('2d');
+          
+          if (!ctx) {
+            throw new Error('Canvas context not available');
+          }
+
+          canvas.width = width;
+          canvas.height = height;
+
+          // Draw resized image
+          ctx.drawImage(img, 0, 0, width, height);
+
+          // Convert to JPEG with 80% quality
+          canvas.toBlob(
+            (blob) => {
+              if (!blob) {
+                reject(new Error('Failed to process image'));
+                return;
+              }
+
+              // Create new File object
+              const processedFile = new File(
+                [blob], 
+                file.name.replace(/\.[^/.]+$/, '.jpg'), // Change extension to .jpg
+                { 
+                  type: 'image/jpeg',
+                  lastModified: Date.now()
+                }
+              );
+
+              console.log(`Image processed: ${file.size} → ${processedFile.size} bytes (${Math.round(width)}x${Math.round(height)}px)`);
+              resolve(processedFile);
+            },
+            'image/jpeg',
+            0.8 // 80% quality
+          );
+        } catch (error) {
+          console.error('Image processing error:', error);
+          // If processing fails, return original file
+          resolve(file);
+        }
+      };
+
+      img.onerror = () => {
+        console.error('Failed to load image for processing');
+        // If image loading fails, return original file
+        resolve(file);
+      };
+
+      // Load image
+      img.src = URL.createObjectURL(file);
+    });
+  };
+
   const uploadFile = async (file: File): Promise<void> => {
     // Add file to uploading list
     setUploadingFiles(prev => [...prev, {
@@ -88,17 +164,34 @@ export function PhotoUploader({
     }]);
 
     try {
-      // Simulate progress updates
+      // Update progress to 10% - processing image
+      setUploadingFiles(prev => prev.map(f => 
+        f.file === file 
+          ? { ...f, progress: 10 }
+          : f
+      ));
+
+      // Process image on client side (resize & compress)
+      const processedFile = await processImage(file);
+
+      // Update progress to 20% - uploading
+      setUploadingFiles(prev => prev.map(f => 
+        f.file === file 
+          ? { ...f, progress: 20 }
+          : f
+      ));
+
+      // Simulate progress updates during upload
       const progressInterval = setInterval(() => {
         setUploadingFiles(prev => prev.map(f => 
           f.file === file && f.status === 'uploading' 
-            ? { ...f, progress: Math.min(f.progress + 10, 90) }
+            ? { ...f, progress: Math.min(f.progress + 15, 90) }
             : f
         ));
-      }, 200);
+      }, 300);
 
-      // Upload file
-      const response = await apiClient.uploadPhoto(itemId, file);
+      // Upload BOTH original and processed files
+      const response = await apiClient.uploadPhotoBoth(itemId, file, processedFile);
 
       clearInterval(progressInterval);
 

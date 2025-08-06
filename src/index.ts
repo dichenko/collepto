@@ -9,6 +9,8 @@ import { exportRouter } from './api/export';
 import { authRouter } from './api/auth';
 import type { Env } from './types';
 
+// No longer needed - KV stores binary data directly
+
 const app = new Hono<{ Bindings: Env }>();
 
 // Middleware
@@ -194,6 +196,96 @@ app.get('/api/blog/:id', async (c) => {
   });
 });
 
+// Public slug endpoints
+app.get('/api/items/slug/:slug', async (c) => {
+  try {
+    const slug = c.req.param('slug');
+    
+    // Try to find by slug first
+    let item = await c.env.DB.prepare(`
+      SELECT * FROM items WHERE slug = ?
+    `).bind(slug).first();
+    
+    // If not found by slug, try to extract ID from slug and search by ID prefix
+    if (!item) {
+      const match = slug.match(/_([a-zA-Z0-9]{4})$/);
+      if (match) {
+        const idPrefix = match[1];
+        item = await c.env.DB.prepare(`
+          SELECT * FROM items WHERE id LIKE ?
+        `).bind(`${idPrefix}%`).first();
+      }
+    }
+    
+    if (!item) {
+      return c.json({ success: false, error: 'Item not found' }, 404);
+    }
+    
+    // Get photos for this item
+    const photos = await c.env.DB.prepare(`
+      SELECT compressed_path FROM photo_assets WHERE item_id = ?
+    `).bind(item.id).all();
+    
+    // Convert file paths to public URLs
+    const photoUrls = photos.results?.map(p => {
+      return `/api/photos/serve/${p.compressed_path.replace('assets/', '')}`;
+    }) || [];
+    
+    return c.json({
+      success: true,
+      data: {
+        ...item,
+        tags: JSON.parse(item.tags || '[]'),
+        photos: photoUrls
+      }
+    });
+  } catch (error) {
+    console.error('Get item by slug error:', error);
+    return c.json({ success: false, error: 'Failed to fetch item' }, 500);
+  }
+});
+
+app.get('/api/blog/slug/:slug', async (c) => {
+  try {
+    const slug = c.req.param('slug');
+    
+    // Try to find by slug first
+    let post = await c.env.DB.prepare(`
+      SELECT * FROM blog_posts WHERE slug = ? AND published = 1
+    `).bind(slug).first();
+    
+    // If not found by slug, try to extract ID from slug and search by ID prefix
+    if (!post) {
+      const match = slug.match(/_([a-zA-Z0-9]{4})$/);
+      if (match) {
+        const idPrefix = match[1];
+        post = await c.env.DB.prepare(`
+          SELECT * FROM blog_posts WHERE id LIKE ? AND published = 1
+        `).bind(`${idPrefix}%`).first();
+      }
+    }
+    
+    if (!post) {
+      return c.json({ success: false, error: 'Blog post not found' }, 404);
+    }
+    
+    return c.json({
+      success: true,
+      data: {
+        ...post,
+        publishDate: post.publish_date,
+        relatedItems: JSON.parse(post.related_items || '[]'),
+        createdAt: post.created_at,
+        updatedAt: post.updated_at,
+        published: Boolean(post.published)
+      }
+    });
+  } catch (error) {
+    console.error('Get blog post by slug error:', error);
+    return c.json({ success: false, error: 'Failed to fetch blog post' }, 500);
+  }
+});
+
 // Protected admin routes
 app.use('/api/admin/*', authMiddleware);
 app.route('/api/admin/items', itemsRouter);
@@ -207,27 +299,91 @@ app.get('/api/photos/serve/*', async (c) => {
   const photoPath = url.pathname.replace('/api/photos/serve/', '');
   
   try {
-    const key = `photo-storage/assets/${photoPath}`;
-    const storedData = await c.env.SESSIONS.get(key);
+    // Try multiple possible key formats for legacy compatibility
+    const possibleKeys = [
+      `photo-storage/assets/${photoPath}`,    // New format
+      `assets/${photoPath}`,                 // Legacy format 1
+      `photo-storage/${photoPath}`,          // Legacy format 2
+      photoPath                              // Direct path
+    ];
     
-    if (!storedData) {
-      return c.notFound();
+    console.log(`🔍 Looking for photo: ${photoPath}`);
+    
+    for (const key of possibleKeys) {
+      console.log(`Trying to serve photo with key: ${key}`);
+      
+      // Try new binary format first
+      const { value: buffer, metadata } = await c.env.SESSIONS.getWithMetadata(key, 'arrayBuffer');
+      
+      if (buffer && metadata) {
+        const { mimeType, size, isCompressed } = metadata as any;
+        console.log(`Found binary data for key: ${key}, isCompressed: ${isCompressed}, includes resized: ${key.includes('resized/')}`);
+        
+        // Only serve compressed images through public endpoint
+        if (isCompressed || key.includes('resized/')) {
+          console.log(`✅ Serving binary photo from key: ${key}`);
+          return c.body(buffer, 200, {
+            'Content-Type': mimeType,
+            'Cache-Control': 'public, max-age=31536000', // 1 year cache
+            'Content-Length': size.toString()
+          });
+        } else {
+          console.log(`❌ Skipping binary photo from key: ${key} (not compressed)`);
+        }
+      } else {
+        console.log(`No binary data found for key: ${key}`);
+      }
+      
+      // Try legacy JSON+base64 format
+      const legacyData = await c.env.SESSIONS.get(key);
+      if (legacyData) {
+        try {
+          const { data, mimeType, isCompressed } = JSON.parse(legacyData);
+          console.log(`Found legacy data for key: ${key}, isCompressed: ${isCompressed}, includes resized: ${key.includes('resized/')}`);
+          
+          // Only serve compressed images through public endpoint
+          if (isCompressed || key.includes('resized/')) {
+            console.log(`✅ Serving legacy photo from key: ${key}`);
+            
+            // Convert base64 back to buffer with robust error handling
+            let cleanBase64 = data.replace(/\s/g, '');
+            
+            // Fix common base64 issues
+            cleanBase64 = cleanBase64.replace(/[^A-Za-z0-9+/=]/g, ''); // Remove invalid chars
+            
+            // Ensure proper padding
+            while (cleanBase64.length % 4 !== 0) {
+              cleanBase64 += '=';
+            }
+            
+            console.log(`Attempting to decode base64 of length: ${cleanBase64.length}`);
+            
+            const binaryString = atob(cleanBase64);
+            const legacyBuffer = new Uint8Array(binaryString.length);
+            for (let i = 0; i < binaryString.length; i++) {
+              legacyBuffer[i] = binaryString.charCodeAt(i);
+            }
+            
+            console.log(`Successfully decoded legacy base64 to buffer of size: ${legacyBuffer.length}`)
+            
+            return c.body(legacyBuffer, 200, {
+              'Content-Type': mimeType,
+              'Cache-Control': 'public, max-age=31536000', // 1 year cache
+              'Content-Length': legacyBuffer.length.toString()
+            });
+          } else {
+            console.log(`❌ Skipping legacy photo from key: ${key} (not compressed)`);
+          }
+        } catch (legacyError) {
+          console.error(`Legacy format parsing error for key ${key}:`, legacyError);
+        }
+      } else {
+        console.log(`No legacy data found for key: ${key}`);
+      }
     }
     
-    const { data, mimeType, size, isCompressed } = JSON.parse(storedData);
-    
-    // Only serve compressed images through public endpoint
-    if (!isCompressed) {
-      return c.notFound();
-    }
-    
-    const buffer = Uint8Array.from(atob(data), c => c.charCodeAt(0));
-    
-    return c.body(buffer, 200, {
-      'Content-Type': mimeType,
-      'Cache-Control': 'public, max-age=31536000', // 1 year cache
-      'Content-Length': size.toString()
-    });
+    console.log(`Photo not found in any format for path: ${photoPath}`);
+    return c.notFound();
   } catch (error) {
     console.error('Photo serve error:', error);
     return c.notFound();
@@ -241,20 +397,45 @@ app.get('/api/assets/*', async (c) => {
   
   try {
     const key = `assets/${assetPath}`;
-    const storedData = await c.env.SESSIONS.get(key);
     
-    if (!storedData) {
-      return c.notFound();
+    // Try new binary format first
+    const { value: buffer, metadata } = await c.env.SESSIONS.getWithMetadata(key, 'arrayBuffer');
+    
+    if (buffer && metadata) {
+      const { mimeType } = metadata as any;
+      
+      return c.body(buffer, 200, {
+        'Content-Type': mimeType,
+        'Cache-Control': 'public, max-age=31536000', // 1 year cache
+        'Content-Length': buffer.byteLength.toString()
+      });
     }
     
-    const { data, mimeType } = JSON.parse(storedData);
-    const buffer = Uint8Array.from(atob(data), c => c.charCodeAt(0));
+    // Try legacy JSON+base64 format
+    const legacyData = await c.env.SESSIONS.get(key);
+    if (legacyData) {
+      try {
+        const { data, mimeType } = JSON.parse(legacyData);
+        
+        // Convert base64 back to buffer safely
+        const cleanBase64 = data.replace(/\s/g, '');
+        const binaryString = atob(cleanBase64);
+        const legacyBuffer = new Uint8Array(binaryString.length);
+        for (let i = 0; i < binaryString.length; i++) {
+          legacyBuffer[i] = binaryString.charCodeAt(i);
+        }
+        
+        return c.body(legacyBuffer, 200, {
+          'Content-Type': mimeType,
+          'Cache-Control': 'public, max-age=31536000', // 1 year cache
+          'Content-Length': legacyBuffer.length.toString()
+        });
+      } catch (legacyError) {
+        console.error('Legacy format parsing error:', legacyError);
+      }
+    }
     
-    return c.body(buffer, 200, {
-      'Content-Type': mimeType,
-      'Cache-Control': 'public, max-age=31536000', // 1 year cache
-      'Content-Length': buffer.length.toString()
-    });
+    return c.notFound();
   } catch (error) {
     console.error('Dynamic asset fetch error:', error);
     return c.notFound();

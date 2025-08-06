@@ -19,6 +19,7 @@ export interface CollectorItem {
   condition?: string;
   acquisition?: string;
   value?: string;
+  slug?: string;
   photos: string[];
   createdAt: string;
   updatedAt: string;
@@ -34,6 +35,7 @@ export interface BlogPost {
   relatedItems: string[];
   category: string;
   published: boolean;
+  slug?: string;
   createdAt: string;
   updatedAt: string;
 }
@@ -134,6 +136,10 @@ class ApiClient {
     return this.request(`/items/${id}`);
   }
 
+  async getItemBySlug(slug: string): Promise<ApiResponse<CollectorItem>> {
+    return this.request(`/items/slug/${slug}`);
+  }
+
   async searchItems(params: {
     q?: string;
     category?: string;
@@ -161,6 +167,10 @@ class ApiClient {
 
   async getBlogPost(id: string): Promise<ApiResponse<BlogPost>> {
     return this.request(`/blog/${id}`);
+  }
+
+  async getBlogPostBySlug(slug: string): Promise<ApiResponse<BlogPost>> {
+    return this.request(`/blog/slug/${slug}`);
   }
 
   // Admin API - Items
@@ -244,6 +254,46 @@ class ApiClient {
       return data;
     } catch (error) {
       console.error('Photo upload failed:', error);
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Upload failed'
+      };
+    }
+  }
+
+  // Admin API - Upload both original and processed photo
+  async uploadPhotoBoth(itemId: string, originalFile: File, processedFile: File): Promise<ApiResponse<{
+    id: string;
+    publicUrl: string;
+    filename: string;
+  }>> {
+    const formData = new FormData();
+    formData.append('original', originalFile);
+    formData.append('processed', processedFile);
+
+    const config: RequestInit = {
+      method: 'POST',
+      body: formData,
+    };
+
+    // Add auth header but don't set Content-Type (browser will set it with boundary for FormData)
+    if (this.sessionToken) {
+      config.headers = {
+        'Authorization': `Bearer ${this.sessionToken}`,
+      };
+    }
+
+    try {
+      const response = await fetch(`${this.baseUrl}/admin/photos/item/${itemId}/upload-both`, config);
+      const data = await response.json();
+      
+      if (!response.ok) {
+        throw new Error(data.error || `HTTP ${response.status}`);
+      }
+      
+      return data;
+    } catch (error) {
+      console.error('Photo upload (both) failed:', error);
       return {
         success: false,
         error: error instanceof Error ? error.message : 'Upload failed'

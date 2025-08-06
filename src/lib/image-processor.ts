@@ -41,19 +41,17 @@ export class ImageProcessor {
       // Store original file
       await this.storeFile(originalPath, originalBuffer, file.type);
 
-      // Process and compress image using Canvas API in Worker
-      const processedResult = await this.resizeAndCompressImage(originalBuffer, file.type);
-      
-      // Store compressed file
-      await this.storeFile(compressedPath, processedResult.buffer, 'image/jpeg');
+      // Files are now pre-processed on client side, so just store as "compressed" version
+      // No need to process again - client already resized to 1920px and converted to JPEG at 80% quality
+      await this.storeFile(compressedPath, originalBuffer, file.type);
 
       return {
         originalPath,
         compressedPath,
         filename,
         size: file.size,
-        width: processedResult.width,
-        height: processedResult.height
+        width: 1920, // Files are pre-processed on client to max 1920px
+        height: 1080 // Estimated height - actual dimensions vary
       };
     } catch (error) {
       // Cleanup on error
@@ -67,149 +65,74 @@ export class ImageProcessor {
     }
   }
 
-  private async resizeAndCompressImage(buffer: Uint8Array, mimeType: string): Promise<{
-    buffer: Uint8Array;
+  // New method to handle both original and processed files separately
+  async processBothFiles(originalFile: File, processedFile: File, itemId: string): Promise<{
+    originalPath: string;
+    compressedPath: string;
+    filename: string;
+    size: number;
     width: number;
     height: number;
   }> {
+    const timestamp = Date.now();
+    const randomId = Math.random().toString(36).substr(2, 8);
+    const baseFilename = `${itemId}_${timestamp}_${randomId}`;
+    
+    const originalPath = `assets/originals/${baseFilename}.${originalFile.name.split('.').pop()}`;
+    const compressedPath = `assets/resized/${baseFilename}.jpg`;
+
+    // Read file buffers
+    const originalBuffer = new Uint8Array(await originalFile.arrayBuffer());
+    const processedBuffer = new Uint8Array(await processedFile.arrayBuffer());
+
     try {
-      // Create blob from the buffer
-      const blob = new Blob([buffer], { type: mimeType });
-      
-      // Create ImageBitmap from blob (supported in Workers)
-      const imageBitmap = await createImageBitmap(blob);
-      
-      const originalWidth = imageBitmap.width;
-      const originalHeight = imageBitmap.height;
-      
-      // Calculate new dimensions (max 1920px on longest side)
-      const maxSize = 1920;
-      let newWidth = originalWidth;
-      let newHeight = originalHeight;
-      
-      if (originalWidth > maxSize || originalHeight > maxSize) {
-        if (originalWidth > originalHeight) {
-          newHeight = Math.round((originalHeight * maxSize) / originalWidth);
-          newWidth = maxSize;
-        } else {
-          newWidth = Math.round((originalWidth * maxSize) / originalHeight);
-          newHeight = maxSize;
-        }
-      }
-      
-      // Create OffscreenCanvas for processing
-      const canvas = new OffscreenCanvas(newWidth, newHeight);
-      const ctx = canvas.getContext('2d');
-      
-      if (!ctx) {
-        throw new Error('Cannot create canvas context');
-      }
-      
-      // Draw the resized image
-      ctx.drawImage(imageBitmap, 0, 0, newWidth, newHeight);
-      
-      // Convert to JPEG with 80% quality
-      const compressedBlob = await canvas.convertToBlob({
-        type: 'image/jpeg',
-        quality: 0.8 // 80% quality as per ТЗ
-      });
-      
-      // Convert blob back to buffer
-      const compressedBuffer = new Uint8Array(await compressedBlob.arrayBuffer());
-      
-      // Close the ImageBitmap to free memory
-      imageBitmap.close();
-      
-      console.log(`Resized and compressed image: ${buffer.length} -> ${compressedBuffer.length} bytes, ${newWidth}x${newHeight}px`);
-      
+      // Store REAL original file (unprocessed)
+      await this.storeFile(originalPath, originalBuffer, originalFile.type);
+
+      // Store processed file (resized & compressed from client)
+      await this.storeFile(compressedPath, processedBuffer, processedFile.type);
+
       return {
-        buffer: compressedBuffer,
-        width: newWidth,
-        height: newHeight
+        originalPath,
+        compressedPath,
+        filename: baseFilename + '.jpg',
+        size: processedFile.size,
+        width: 1920, // Files are pre-processed on client to max 1920px
+        height: 1080 // Estimated height - actual dimensions vary
       };
     } catch (error) {
-      console.error('Image processing error:', error);
-      
-      // Fallback: simple compression without resizing
+      // Cleanup on error
       try {
-        return await this.fallbackCompression(buffer, mimeType);
-      } catch (fallbackError) {
-        console.error('Fallback compression failed:', fallbackError);
-        return {
-          buffer: buffer,
-          width: 1920,
-          height: 1080
-        };
+        await this.deleteFile(originalPath);
+        await this.deleteFile(compressedPath);
+      } catch (cleanupError) {
+        console.error('Cleanup error:', cleanupError);
       }
+      throw error;
     }
   }
-  
-  private async fallbackCompression(buffer: Uint8Array, mimeType: string): Promise<{
-    buffer: Uint8Array;
-    width: number;
-    height: number;
-  }> {
-    try {
-      // Try basic Canvas compression without resizing
-      const blob = new Blob([buffer], { type: mimeType });
-      const imageBitmap = await createImageBitmap(blob);
-      
-      const width = imageBitmap.width;
-      const height = imageBitmap.height;
-      
-      const canvas = new OffscreenCanvas(width, height);
-      const ctx = canvas.getContext('2d');
-      
-      if (ctx) {
-        ctx.drawImage(imageBitmap, 0, 0);
-        
-        const compressedBlob = await canvas.convertToBlob({
-          type: 'image/jpeg',
-          quality: 0.8
-        });
-        
-        const compressedBuffer = new Uint8Array(await compressedBlob.arrayBuffer());
-        imageBitmap.close();
-        
-        console.log(`Fallback Canvas compression: ${buffer.length} -> ${compressedBuffer.length} bytes`);
-        
-        return {
-          buffer: compressedBuffer,
-          width,
-          height
-        };
-      }
-    } catch (error) {
-      console.error('Canvas fallback failed:', error);
-    }
-    
-    // Ultimate fallback - just return original if everything fails
-    console.log(`No compression applied, returning original: ${buffer.length} bytes`);
-    return {
-      buffer: buffer,
-      width: 1920, // Estimated dimensions
-      height: 1080
-    };
-  }
+
+  // Image processing is now handled on client-side
+  // No server-side processing needed - files arrive pre-processed
 
   private async storeFile(path: string, buffer: Uint8Array, mimeType: string): Promise<void> {
     try {
       // Store files in KV namespace
       // Оригиналы помечаем как originals/, сжатые как resized/
       const key = `photo-storage/${path}`;
-      const base64Data = btoa(String.fromCharCode(...buffer));
       
-      // Store in KV with metadata
-      await this.env.SESSIONS.put(key, JSON.stringify({
-        data: base64Data,
-        mimeType,
-        size: buffer.length,
-        uploadedAt: new Date().toISOString(),
-        isOriginal: path.includes('originals/'),
-        isCompressed: path.includes('resized/')
-      }));
+      // Store binary data directly in KV (no base64 needed!)
+      await this.env.SESSIONS.put(key, buffer, {
+        metadata: {
+          mimeType,
+          size: buffer.length,
+          uploadedAt: new Date().toISOString(),
+          isOriginal: path.includes('originals/'),
+          isCompressed: path.includes('resized/')
+        }
+      });
       
-      console.log(`Stored file in KV: ${path}, size: ${buffer.length}, type: ${mimeType}`);
+      console.log(`Stored binary file in KV: ${path}, size: ${buffer.length}, type: ${mimeType}`);
     } catch (error) {
       console.error('File storage error:', error);
       throw new Error('Failed to store file');

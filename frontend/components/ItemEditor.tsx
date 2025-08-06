@@ -50,7 +50,11 @@ export function ItemEditor({ itemId, onSave, onCancel }: ItemEditorProps) {
   const [isSaving, setIsSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [validationErrors, setValidationErrors] = useState<{ [key: string]: string }>({});
-  const [pendingPhotos, setPendingPhotos] = useState<File[]>([]); // Временные фото для нового предмета
+  interface PhotoWithOriginal {
+    original: File;
+    processed: File;
+  }
+  const [pendingPhotos, setPendingPhotos] = useState<PhotoWithOriginal[]>([]); // Временные фото для нового предмета
 
   // Load existing item if editing
   useEffect(() => {
@@ -134,9 +138,9 @@ export function ItemEditor({ itemId, onSave, onCancel }: ItemEditorProps) {
           // Upload pending photos if any
           if (pendingPhotos.length > 0) {
             try {
-              // Upload photos one by one
-              for (const photo of pendingPhotos) {
-                await apiClient.uploadPhoto(newItemId, photo);
+              // Upload photos one by one using both original and processed files
+              for (const photoWithOriginal of pendingPhotos) {
+                await apiClient.uploadPhotoBoth(newItemId, photoWithOriginal.original, photoWithOriginal.processed);
               }
               
               // Clear pending photos

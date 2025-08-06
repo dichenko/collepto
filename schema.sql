@@ -18,6 +18,7 @@ CREATE TABLE IF NOT EXISTS items (
     condition TEXT,
     acquisition TEXT,
     value TEXT,
+    slug TEXT, -- URL slug for routing
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
 );
@@ -33,6 +34,7 @@ CREATE TABLE IF NOT EXISTS blog_posts (
     related_items TEXT, -- JSON array of item IDs
     category TEXT NOT NULL,
     published BOOLEAN DEFAULT 0,
+    slug TEXT, -- URL slug for routing
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
 );
@@ -61,7 +63,9 @@ CREATE TABLE IF NOT EXISTS sessions (
 CREATE INDEX IF NOT EXISTS idx_items_category ON items(category);
 CREATE INDEX IF NOT EXISTS idx_items_year ON items(year);
 CREATE INDEX IF NOT EXISTS idx_items_created_at ON items(created_at);
+CREATE INDEX IF NOT EXISTS idx_items_slug ON items(slug);
 CREATE INDEX IF NOT EXISTS idx_blog_posts_publish_date ON blog_posts(publish_date);
 CREATE INDEX IF NOT EXISTS idx_blog_posts_published ON blog_posts(published);
+CREATE INDEX IF NOT EXISTS idx_blog_posts_slug ON blog_posts(slug);
 CREATE INDEX IF NOT EXISTS idx_photo_assets_item_id ON photo_assets(item_id);
 CREATE INDEX IF NOT EXISTS idx_sessions_expires_at ON sessions(expires_at);

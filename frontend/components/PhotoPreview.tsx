@@ -11,9 +11,14 @@ import {
   AlertCircle
 } from 'lucide-react';
 
+interface PhotoWithOriginal {
+  original: File;
+  processed: File;
+}
+
 interface PhotoPreviewProps {
-  photos: File[];
-  onPhotosChange: (photos: File[]) => void;
+  photos: PhotoWithOriginal[];
+  onPhotosChange: (photos: PhotoWithOriginal[]) => void;
   maxPhotos?: number;
 }
 
@@ -55,7 +60,83 @@ export function PhotoPreview({ photos, onPhotosChange, maxPhotos = 10 }: PhotoPr
     return null;
   };
 
-  const handleFiles = useCallback((files: FileList | File[]) => {
+  // Client-side image processing
+  const processImage = async (file: File): Promise<File> => {
+    return new Promise((resolve, reject) => {
+      const img = new Image();
+      img.onload = () => {
+        try {
+          // Calculate new dimensions (max 1920px on longest side)
+          const maxSize = 1920;
+          let { width, height } = img;
+          
+          if (width > maxSize || height > maxSize) {
+            if (width > height) {
+              height = (height * maxSize) / width;
+              width = maxSize;
+            } else {
+              width = (width * maxSize) / height;
+              height = maxSize;
+            }
+          }
+
+          // Create canvas for resizing
+          const canvas = document.createElement('canvas');
+          const ctx = canvas.getContext('2d');
+          
+          if (!ctx) {
+            throw new Error('Canvas context not available');
+          }
+
+          canvas.width = width;
+          canvas.height = height;
+
+          // Draw resized image
+          ctx.drawImage(img, 0, 0, width, height);
+
+          // Convert to JPEG with 80% quality
+          canvas.toBlob(
+            (blob) => {
+              if (!blob) {
+                reject(new Error('Failed to process image'));
+                return;
+              }
+
+              // Create new File object
+              const processedFile = new File(
+                [blob], 
+                file.name.replace(/\.[^/.]+$/, '.jpg'), // Change extension to .jpg
+                { 
+                  type: 'image/jpeg',
+                  lastModified: Date.now()
+                }
+              );
+
+              console.log(`Image processed: ${file.size} → ${processedFile.size} bytes (${Math.round(width)}x${Math.round(height)}px)`);
+              resolve(processedFile);
+            },
+            'image/jpeg',
+            0.8 // 80% quality
+          );
+        } catch (error) {
+          console.error('Image processing error:', error);
+          // If processing fails, return original file
+          resolve(file);
+        }
+      };
+
+      img.onerror = () => {
+        console.error('Failed to load image for processing');
+        // If image loading fails, return original file
+        resolve(file);
+      };
+
+      // Load image
+      img.src = URL.createObjectURL(file);
+    });
+  };
+
+  const handleFiles = useCallback(async (files: FileList | File[]) => {
     setError(null);
     const fileArray = Array.from(files);
 
@@ -83,8 +164,24 @@ export function PhotoPreview({ photos, onPhotosChange, maxPhotos = 10 }: PhotoPr
       return;
     }
 
-    // Add valid files to photos array
-    onPhotosChange([...photos, ...validFiles]);
+    try {
+      // Process all valid files and create PhotoWithOriginal objects
+      const photoWithOriginals = await Promise.all(
+        validFiles.map(async (originalFile) => {
+          const processedFile = await processImage(originalFile);
+          return {
+            original: originalFile,
+            processed: processedFile
+          };
+        })
+      );
+
+      // Add photo pairs to photos array
+      onPhotosChange([...photos, ...photoWithOriginals]);
+    } catch (error) {
+      console.error('Error processing images:', error);
+      setError('Ошибка обработки изображений. Попробуйте еще раз.');
+    }
   }, [photos, onPhotosChange, remainingSlots, maxPhotos]);
 
   const handleDragOver = useCallback((e: React.DragEvent) => {
@@ -117,8 +214,9 @@ export function PhotoPreview({ photos, onPhotosChange, maxPhotos = 10 }: PhotoPr
     onPhotosChange(updatedPhotos);
   };
 
-  const createImageUrl = (file: File) => {
-    return URL.createObjectURL(file);
+  const createImageUrl = (photoWithOriginal: PhotoWithOriginal) => {
+    // Use processed file for preview
+    return URL.createObjectURL(photoWithOriginal.processed);
   };
 
   return (
@@ -223,7 +321,7 @@ export function PhotoPreview({ photos, onPhotosChange, maxPhotos = 10 }: PhotoPr
                 
                 {/* File info */}
                 <div className="absolute bottom-1 left-1 right-1 bg-black/60 text-white text-xs px-2 py-1 rounded truncate">
-                  {photo.name}
+                  {photo.original.name}
                 </div>
               </div>
             ))}
