@@ -11,14 +11,12 @@ interface ItemCardProps {
   item: CollectorItem;
   onTagClick?: (tag: string) => void;
   onCategoryClick?: (category: string) => void;
-  onItemClick?: () => void;
 }
 
 export function ItemCard({
   item,
   onTagClick,
-  onCategoryClick,
-  onItemClick
+  onCategoryClick
 }: ItemCardProps) {
   const [currentImageIndex, setCurrentImageIndex] = useState(0);
   const [isHovering, setIsHovering] = useState(false);
@@ -56,6 +54,7 @@ export function ItemCard({
               variant="secondary" 
               className="bg-white/90 text-primary cursor-pointer badge-refined select-none"
               onClick={(e) => {
+                e.preventDefault();
                 e.stopPropagation();
                 onCategoryClick?.(item.category);
               }}
@@ -101,7 +100,11 @@ export function ItemCard({
                 key={index} 
                 variant="outline" 
                 className="text-xs cursor-pointer badge-refined select-none"
-                onClick={() => onTagClick?.(tag)}
+                onClick={(e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  onTagClick?.(tag);
+                }}
               >
                 {tag}
               </Badge>
@@ -128,11 +131,6 @@ export function ItemCard({
           variant="outline"
           size="sm"
           className="w-full gap-2 btn-refined"
-          onClick={(e) => {
-            e.preventDefault();
-            e.stopPropagation();
-            onItemClick?.();
-          }}
         >
           <MoreHorizontal className="w-4 h-4" />
           Подробнее

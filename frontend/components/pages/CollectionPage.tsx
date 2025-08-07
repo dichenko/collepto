@@ -258,13 +258,17 @@ export function CollectionPage() {
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
             {filteredItems.map((item) => (
-              <ItemCard
-                key={item.id}
-                item={item}
-                onTagClick={handleTagClick}
-                onCategoryClick={handleCategoryClick}
-                onItemClick={() => navigate(createItemPath(item.title, item.id))}
-              />
+              <Link 
+                key={item.id} 
+                to={createItemPath(item.title, item.id)}
+                className="block"
+              >
+                <ItemCard
+                  item={item}
+                  onTagClick={handleTagClick}
+                  onCategoryClick={handleCategoryClick}
+                />
+              </Link>
             ))}
           </div>
         )}

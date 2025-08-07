@@ -18,7 +18,7 @@ export default function App() {
     <ThemeProvider defaultTheme="light" storageKey="collepto-theme">
       <Routes>
         <Route path="/" element={<CollectionPage />} />
-        <Route path="/items/:slug" element={<ItemPage />} />
+        <Route path="/items/*" element={<ItemPage />} />
         <Route path="/blog" element={<BlogListPage />} />
         <Route path="/blog/:slug" element={<BlogPostPage />} />
         {/* Catch-all route for 404 */}

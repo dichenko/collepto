@@ -1,13 +1,16 @@
 import { useState, useEffect } from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
+import { useParams, useNavigate, useLocation } from 'react-router-dom';
 import { Button } from '../ui/button';
 import { ArrowLeft } from 'lucide-react';
 import { ItemView } from '../ItemView';
 import { apiClient, type CollectorItem } from '../../utils/api';
 
 export function ItemPage() {
-  const { slug } = useParams<{ slug: string }>();
+  const location = useLocation();
   const navigate = useNavigate();
+  
+  // Extract slug from pathname: /items/title-slug_1234 -> title-slug_1234
+  const slug = location.pathname.replace('/items/', '');
   const [item, setItem] = useState<CollectorItem | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
