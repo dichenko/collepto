@@ -7,6 +7,7 @@ import { blogRouter } from './api/blog';
 import { photosRouter } from './api/photos';
 import { exportRouter } from './api/export';
 import { authRouter } from './api/auth';
+import { DatabaseQueries } from './db/queries';
 
 import type { Env } from './types';
 
@@ -156,48 +157,7 @@ app.get('/api/items/:id', async (c) => {
   });
 });
 
-app.get('/api/items/slug/:slug', async (c) => {
-  const slug = c.req.param('slug');
-  
-  // Extract ID from slug (format: title-uuid)
-  const slugParts = slug.split('-');
-  const possibleId = slugParts[slugParts.length - 1];
-  
-  // Try to find by ID first
-  let item = await c.env.DB.prepare(`
-    SELECT * FROM items WHERE id = ?
-  `).bind(possibleId).first();
-  
-  // If not found by ID, try to find by slug
-  if (!item) {
-    item = await c.env.DB.prepare(`
-      SELECT * FROM items WHERE slug = ?
-    `).bind(slug).first();
-  }
-  
-  if (!item) {
-    return c.json({ success: false, error: 'Item not found' }, 404);
-  }
-  
-  // Get photos for this item
-  const photos = await c.env.DB.prepare(`
-    SELECT compressed_path, thumbnail_path FROM photo_assets WHERE item_id = ?
-  `).bind(item.id).all();
-  
-  // Convert file paths to public URLs - all photos are now in R2
-  const photoUrls = photos.results?.map(p => {
-    return `/api/photos/r2/compressed/${p.compressed_path.split('/').pop()}`;
-  }) || [];
-  
-  return c.json({
-    success: true,
-    data: {
-      ...item,
-      tags: JSON.parse(item.tags || '[]'),
-      photos: photoUrls
-    }
-  });
-});
+
 
 app.get('/api/blog', async (c) => {
   // Public blog posts
@@ -244,20 +204,15 @@ app.get('/api/blog/:id', async (c) => {
 app.get('/api/items/slug/:slug', async (c) => {
   try {
     const slug = c.req.param('slug');
-    
-    // Try to find by slug first
-    let item = await c.env.DB.prepare(`
-      SELECT * FROM items WHERE slug = ?
-    `).bind(slug).first();
+    const db = new DatabaseQueries(c.env);
+    let item = await db.getItemBySlug(slug);
     
     // If not found by slug, try to extract ID from slug and search by ID prefix
     if (!item) {
-      const match = slug.match(/_([a-zA-Z0-9]{4})$/);
-      if (match) {
-        const idPrefix = match[1];
-        item = await c.env.DB.prepare(`
-          SELECT * FROM items WHERE id LIKE ?
-        `).bind(`${idPrefix}%`).first();
+      const { extractIdFromSlug } = await import('./lib/slugify');
+      const idPrefix = extractIdFromSlug(slug);
+      if (idPrefix) {
+        item = await db.findItemByIdPrefix(idPrefix);
       }
     }
     
@@ -265,23 +220,9 @@ app.get('/api/items/slug/:slug', async (c) => {
       return c.json({ success: false, error: 'Item not found' }, 404);
     }
     
-    // Get photos for this item
-    const photos = await c.env.DB.prepare(`
-      SELECT compressed_path FROM photo_assets WHERE item_id = ?
-    `).bind(item.id).all();
-    
-    // Convert file paths to public URLs
-    const photoUrls = photos.results?.map(p => {
-      return `/api/photos/serve/${p.compressed_path.replace('assets/', '')}`;
-    }) || [];
-    
     return c.json({
       success: true,
-      data: {
-        ...item,
-        tags: JSON.parse(item.tags || '[]'),
-        photos: photoUrls
-      }
+      data: item
     });
   } catch (error) {
     console.error('Get item by slug error:', error);

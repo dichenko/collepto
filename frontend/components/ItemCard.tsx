@@ -11,12 +11,14 @@ interface ItemCardProps {
   item: CollectorItem;
   onTagClick?: (tag: string) => void;
   onCategoryClick?: (category: string) => void;
+  onItemClick?: () => void;
 }
 
 export function ItemCard({
   item,
   onTagClick,
-  onCategoryClick
+  onCategoryClick,
+  onItemClick
 }: ItemCardProps) {
   const [currentImageIndex, setCurrentImageIndex] = useState(0);
   const [isHovering, setIsHovering] = useState(false);
@@ -126,6 +128,11 @@ export function ItemCard({
           variant="outline"
           size="sm"
           className="w-full gap-2 btn-refined"
+          onClick={(e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            onItemClick?.();
+          }}
         >
           <MoreHorizontal className="w-4 h-4" />
           Подробнее

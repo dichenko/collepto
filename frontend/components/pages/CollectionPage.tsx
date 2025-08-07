@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Link, useSearchParams } from 'react-router-dom';
+import { Link, useSearchParams, useNavigate } from 'react-router-dom';
 import { Button } from '../ui/button';
 import { Badge } from '../ui/badge';
 import { Settings } from 'lucide-react';
@@ -10,6 +10,7 @@ import { createItemPath } from '../../utils/slugify';
 
 export function CollectionPage() {
   const [searchParams, setSearchParams] = useSearchParams();
+  const navigate = useNavigate();
   const [items, setItems] = useState<CollectorItem[]>([]);
   const [filteredItems, setFilteredItems] = useState<CollectorItem[]>([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -257,17 +258,13 @@ export function CollectionPage() {
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
             {filteredItems.map((item) => (
-              <Link 
-                key={item.id} 
-                to={createItemPath(item.title, item.id)}
-                className="block"
-              >
-                <ItemCard
-                  item={item}
-                  onTagClick={handleTagClick}
-                  onCategoryClick={handleCategoryClick}
-                />
-              </Link>
+              <ItemCard
+                key={item.id}
+                item={item}
+                onTagClick={handleTagClick}
+                onCategoryClick={handleCategoryClick}
+                onItemClick={() => navigate(createItemPath(item.title, item.id))}
+              />
             ))}
           </div>
         )}

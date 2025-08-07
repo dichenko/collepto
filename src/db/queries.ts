@@ -278,10 +278,29 @@ export class DatabaseQueries {
       SELECT compressed_path FROM photo_assets WHERE item_id = ?
     `).bind(item.id).all();
     
+    // Transform field names from database format to interface format
     return {
-      ...item,
+      id: item.id,
+      title: item.title,
+      description: item.description,
+      fullDescription: item.full_description,
+      year: item.year,
+      yearFrom: item.year_from,
+      yearTo: item.year_to,
+      country: item.country,
+      organization: item.organization,
+      size: item.size,
+      edition: item.edition,
+      series: item.series,
       tags: JSON.parse(item.tags || '[]'),
-      photos: photos.results?.map(p => p.compressed_path) || []
+      category: item.category,
+      condition: item.condition,
+      acquisition: item.acquisition,
+      value: item.value,
+      slug: item.slug,
+      photos: photos.results?.map(p => p.compressed_path) || [],
+      createdAt: item.created_at,
+      updatedAt: item.updated_at
     } as CollectorItem;
   }
 
@@ -311,10 +330,29 @@ export class DatabaseQueries {
       SELECT compressed_path FROM photo_assets WHERE item_id = ?
     `).bind(item.id).all();
     
+    // Transform field names from database format to interface format
     return {
-      ...item,
+      id: item.id,
+      title: item.title,
+      description: item.description,
+      fullDescription: item.full_description,
+      year: item.year,
+      yearFrom: item.year_from,
+      yearTo: item.year_to,
+      country: item.country,
+      organization: item.organization,
+      size: item.size,
+      edition: item.edition,
+      series: item.series,
       tags: JSON.parse(item.tags || '[]'),
-      photos: photos.results?.map(p => p.compressed_path) || []
+      category: item.category,
+      condition: item.condition,
+      acquisition: item.acquisition,
+      value: item.value,
+      slug: item.slug,
+      photos: photos.results?.map(p => p.compressed_path) || [],
+      createdAt: item.created_at,
+      updatedAt: item.updated_at
     } as CollectorItem;
   }
 
