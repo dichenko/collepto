@@ -20,7 +20,7 @@
 ### 3. Интеграции и окружение
 - [x] Использовать переменную окружения `PUBLIC_API_BASE` при сборке Astro
 - [x] Стабилизировать сборку при недоступности API (try/catch на страницах списков)
-- [ ] Добавить SEO-мета (title/description/og), sitemap и robots
+- [x] Добавить SEO-мета (title/description/og), sitemap и robots
 
 ### 4. Бэкенд (Cloudflare Worker, D1, KV, R2)
 - [x] Использовать существующий воркер `collepto` из `archive/legacy-spa`
