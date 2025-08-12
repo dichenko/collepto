@@ -23,7 +23,3 @@ id = "d06ad3cbaa3242de81877bd58df5ccf7"
 binding = "PHOTOS_BUCKET"
 bucket_name = "collepto-photos"
 
-[assets]
-directory = "collepto-astro/dist"
-binding = "ASSETS"
-
