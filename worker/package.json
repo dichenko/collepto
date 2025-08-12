@@ -13,46 +13,7 @@
   },
   "devDependencies": {
     "wrangler": "^3.77.0",
-    "typescript": "^5.4.0"
-  }
-}
-
-{
-  "name": "collepto-backend",
-  "version": "1.0.0",
-  "description": "Self-hosted collector's website backend",
-  "main": "src/index.ts",
-  "scripts": {
-    "dev": "wrangler dev",
-    "build": "esbuild --bundle --platform=node --target=node18 --format=esm --outfile=dist/index.js src/index.ts --loader:.ts=ts",
-    "deploy": "wrangler deploy",
-    "db:init": "wrangler d1 execute collepto-db --file=./schema.sql",
-    "db:seed": "wrangler d1 execute collepto-db --file=./seed.sql",
-    "types": "wrangler types"
-  },
-  "keywords": [
-    "cloudflare",
-    "workers",
-    "collection",
-    "museum"
-  ],
-  "author": "Collector",
-  "license": "MIT",
-  "devDependencies": {
-    "@cloudflare/workers-types": "^4.20240109.0",
-    "@types/node": "^20.0.0",
-    "esbuild": "^0.19.0",
-    "typescript": "^5.0.0",
-    "wrangler": "^3.0.0"
-  },
-  "dependencies": {
-    "@cloudflare/ai": "^1.0.0",
-    "archiver": "^6.0.0",
-    "bcryptjs": "^2.4.3",
-    "csv-writer": "^1.6.0",
-    "hono": "^3.11.0",
-    "jsonwebtoken": "^9.0.0",
-
-    "zod": "^3.22.0"
+    "typescript": "^5.4.0",
+    "@cloudflare/workers-types": "^4.20240109.0"
   }
 }
