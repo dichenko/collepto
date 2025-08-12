@@ -24,6 +24,48 @@ app.use('*', cors({
   credentials: true,
 }));
 
+// Basic HTML escape
+const escapeHtml = (s: string) => s
+  .replace(/&/g, '&amp;')
+  .replace(/</g, '&lt;')
+  .replace(/>/g, '&gt;')
+  .replace(/"/g, '&quot;')
+  .replace(/'/g, '&#39;');
+
+function layoutHtml(title: string, body: string): string {
+  return `<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>${escapeHtml(title)}</title>
+  <link rel="icon" href="/favicon.svg" />
+  <style>
+    body{font-family:system-ui,-apple-system,Segoe UI,Roboto,Ubuntu,Cantarell,Noto Sans,sans-serif;margin:0;color:#111}
+    .container{max-width:1000px;margin:0 auto;padding:16px}
+    .grid{display:grid;gap:12px;grid-template-columns:repeat(auto-fill,minmax(240px,1fr))}
+    .card{border:1px solid #e5e7eb;border-radius:8px;padding:12px;background:#fff}
+    .muted{color:#6b7280;font-size:12px}
+    a{color:#2563eb;text-decoration:none}
+    a:hover{text-decoration:underline}
+    nav{display:flex;gap:12px;margin-bottom:16px}
+    img{max-width:100%;height:auto;border-radius:6px}
+  </style>
+  <meta name="description" content="Коллекция и блог Collepto" />
+</head>
+<body>
+  <div class="container">
+    <nav>
+      <a href="/">Главная</a>
+      <a href="/items">Коллекция</a>
+      <a href="/blog">Блог</a>
+    </nav>
+    ${body}
+  </div>
+</body>
+</html>`;
+}
+
 // Debug endpoint
 app.get('/api/debug', async (c) => {
   try {
@@ -277,6 +319,170 @@ app.route('/api/admin/items', itemsRouter);
 app.route('/api/admin/blog', blogRouter);
 app.route('/api/admin/photos', photosRouter);
 app.route('/api/admin/export', exportRouter);
+
+// Public website pages (SSR-like simple HTML)
+app.get('/', async (c) => {
+  try {
+    const res = await c.env.DB.prepare(`
+      SELECT id, title, description, year, tags, category, created_at
+      FROM items
+      ORDER BY created_at DESC
+      LIMIT 6
+    `).all();
+    const items = (res.results || []).map((it: any) => ({
+      ...it,
+      tags: JSON.parse(it.tags || '[]')
+    }));
+
+    const blogRes = await c.env.DB.prepare(`
+      SELECT id, title, excerpt, publish_date, category, slug
+      FROM blog_posts
+      WHERE published = 1
+      ORDER BY publish_date DESC
+      LIMIT 6
+    `).all();
+    const posts = blogRes.results || [];
+
+    const body = `
+      <h1>Collepto</h1>
+      <p class="muted">Последние предметы и записи блога</p>
+      <h2>Последние предметы</h2>
+      ${items.length === 0 ? '<p class="muted">Нет данных.</p>' : `
+        <div class="grid">
+          ${items.map((i: any) => `
+            <div class="card">
+              <a href="/items/${encodeURIComponent(i.id)}"><strong>${escapeHtml(i.title)}</strong></a>
+              ${i.description ? `<div class="muted">${escapeHtml(i.description)}</div>` : ''}
+              <div class="muted">${escapeHtml(i.category || '')} · ${i.year ?? ''}</div>
+            </div>`).join('')}
+        </div>`}
+
+      <h2 style="margin-top:16px">Последние записи</h2>
+      ${posts.length === 0 ? '<p class="muted">Нет данных.</p>' : `
+        <div class="grid">
+          ${posts.map((p: any) => `
+            <div class="card">
+              <a href="/blog/${encodeURIComponent(p.slug || p.id)}"><strong>${escapeHtml(p.title)}</strong></a>
+              <div class="muted">${escapeHtml(p.category || '')} · ${escapeHtml(p.publish_date || '')}</div>
+              ${p.excerpt ? `<div class="muted">${escapeHtml(p.excerpt)}</div>` : ''}
+            </div>`).join('')}
+        </div>`}
+    `;
+    return c.html(layoutHtml('Collepto — главная', body));
+  } catch (e) {
+    return c.html(layoutHtml('Collepto', '<p>Ошибка загрузки.</p>'));
+  }
+});
+
+app.get('/items', async (c) => {
+  try {
+    const res = await c.env.DB.prepare(`
+      SELECT id, title, description, year, tags, category, created_at
+      FROM items
+      ORDER BY created_at DESC
+      LIMIT 30
+    `).all();
+    const items = (res.results || []).map((it: any) => ({
+      ...it,
+      tags: JSON.parse(it.tags || '[]')
+    }));
+    const body = `
+      <h1>Коллекция</h1>
+      ${items.length === 0 ? '<p class="muted">Нет данных.</p>' : `
+        <div class="grid">
+          ${items.map((i: any) => `
+            <div class="card">
+              <a href="/items/${encodeURIComponent(i.id)}"><strong>${escapeHtml(i.title)}</strong></a>
+              ${i.description ? `<div class="muted">${escapeHtml(i.description)}</div>` : ''}
+              <div class="muted">${escapeHtml(i.category || '')} · ${i.year ?? ''}</div>
+            </div>`).join('')}
+        </div>`}
+    `;
+    return c.html(layoutHtml('Коллекция — Collepto', body));
+  } catch {
+    return c.html(layoutHtml('Коллекция — Collepto', '<p>Ошибка загрузки.</p>'));
+  }
+});
+
+app.get('/items/:slug', async (c) => {
+  try {
+    const slug = c.req.param('slug');
+    const db = new DatabaseQueries(c.env);
+    let item = await db.getItemBySlug(slug);
+    if (!item) {
+      const maybe = await c.env.DB.prepare('SELECT * FROM items WHERE id = ?').bind(slug).first();
+      if (maybe) {
+        item = {
+          ...maybe,
+          tags: JSON.parse((maybe as any).tags || '[]')
+        } as any;
+      }
+    }
+    if (!item) return c.notFound();
+
+    const photosRes = await c.env.DB.prepare(`
+      SELECT compressed_path FROM photo_assets WHERE item_id = ? LIMIT 6
+    `).bind(item.id).all();
+    const photos = photosRes.results?.map((p: any) => `/api/photos/r2/compressed/${p.compressed_path.split('/').pop()}`) || [];
+
+    const body = `
+      <h1>${escapeHtml(item.title)}</h1>
+      ${item.description ? `<p>${escapeHtml(item.description)}</p>` : ''}
+      <div class="muted">${escapeHtml(item.category || '')} · ${item.year ?? ''}</div>
+      ${photos.length ? `<div class="grid" style="grid-template-columns:repeat(auto-fill,minmax(160px,1fr))">${photos.map((src: string) => `<a href="${src}" target="_blank" rel="noopener"><img src="${src}" alt="${escapeHtml(item.title)}" loading="lazy" /></a>`).join('')}</div>` : ''}
+    `;
+    return c.html(layoutHtml(`${item.title} — Collepto`, body));
+  } catch {
+    return c.html(layoutHtml('Предмет — Collepto', '<p>Ошибка загрузки.</p>'));
+  }
+});
+
+app.get('/blog', async (c) => {
+  try {
+    const res = await c.env.DB.prepare(`
+      SELECT id, title, excerpt, publish_date, category, slug
+      FROM blog_posts
+      WHERE published = 1
+      ORDER BY publish_date DESC
+      LIMIT 30
+    `).all();
+    const posts = res.results || [];
+    const body = `
+      <h1>Блог</h1>
+      ${posts.length === 0 ? '<p class="muted">Нет данных.</p>' : `
+        <div class="grid">
+          ${posts.map((p: any) => `
+            <div class="card">
+              <a href="/blog/${encodeURIComponent(p.slug || p.id)}"><strong>${escapeHtml(p.title)}</strong></a>
+              <div class="muted">${escapeHtml(p.category || '')} · ${escapeHtml(p.publish_date || '')}</div>
+              ${p.excerpt ? `<div class="muted">${escapeHtml(p.excerpt)}</div>` : ''}
+            </div>`).join('')}
+        </div>`}
+    `;
+    return c.html(layoutHtml('Блог — Collepto', body));
+  } catch {
+    return c.html(layoutHtml('Блог — Collepto', '<p>Ошибка загрузки.</p>'));
+  }
+});
+
+app.get('/blog/:slug', async (c) => {
+  try {
+    const slug = c.req.param('slug');
+    let post = await c.env.DB.prepare('SELECT * FROM blog_posts WHERE slug = ? AND published = 1').bind(slug).first();
+    if (!post) {
+      post = await c.env.DB.prepare('SELECT * FROM blog_posts WHERE id = ? AND published = 1').bind(slug).first();
+    }
+    if (!post) return c.notFound();
+    const body = `
+      <h1>${escapeHtml((post as any).title)}</h1>
+      <div class="muted">${escapeHtml((post as any).publish_date || '')} · ${escapeHtml((post as any).category || '')}</div>
+      <article>${escapeHtml((post as any).content || '')}</article>
+    `;
+    return c.html(layoutHtml(`${(post as any).title} — Collepto`, body));
+  } catch {
+    return c.html(layoutHtml('Пост — Collepto', '<p>Ошибка загрузки.</p>'));
+  }
+});
 
 // Serve photos from R2 storage
 app.get('/api/photos/r2/:variant/:filename', async (c) => {
