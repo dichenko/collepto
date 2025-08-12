@@ -1,0 +1,27 @@
+name = "collepto"
+main = "worker/src/index.ts"
+compatibility_date = "2025-09-12"
+compatibility_flags = ["nodejs_compat"]
+
+[vars]
+# ADMIN_USERNAME / ADMIN_PASSWORD должны быть заданы через Wrangler secrets или UI
+BASE_URL = "https://collepto.3451881.workers.dev"
+R2_PUBLIC_URL = "https://pub-b8b2a61ea8f94c7580a7e39b14a08c8b.r2.dev"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "collepto-db"
+database_id = "3d6b46f5-11a1-469b-ab9a-9b40e84ae3f0"
+
+[[kv_namespaces]]
+binding = "SESSIONS"
+id = "d06ad3cbaa3242de81877bd58df5ccf7"
+
+[[r2_buckets]]
+binding = "PHOTOS_BUCKET"
+bucket_name = "collepto-photos"
+
+[assets]
+directory = "worker/assets"
+binding = "ASSETS"
+
