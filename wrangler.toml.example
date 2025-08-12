@@ -1,0 +1,25 @@
+name = "collepto"
+main = "worker/src/index.ts"
+compatibility_date = "2025-08-12"
+compatibility_flags = ["nodejs_compat"]
+
+[vars]
+# Set via Wrangler secrets or dashboard in production
+ADMIN_USERNAME = "admin"
+ADMIN_PASSWORD = "change-me"
+BASE_URL = "https://<your-worker>.workers.dev"
+R2_PUBLIC_URL = "https://<your-r2-public>.r2.dev"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "collepto-db"
+database_id = "<your-d1-id>"
+
+[[kv_namespaces]]
+binding = "SESSIONS"
+id = "<your-kv-id>"
+
+[[r2_buckets]]
+binding = "PHOTOS_BUCKET"
+bucket_name = "collepto-photos"
+

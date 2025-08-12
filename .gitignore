@@ -1,0 +1,41 @@
+# OS
+.DS_Store
+Thumbs.db
+
+# Editors
+.vscode/
+.idea/
+
+# Node
+node_modules/
+**/node_modules/
+npm-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# Build outputs
+dist/
+**/dist/
+.cache/
+.tmp/
+.temp/
+
+# Astro
+.astro/
+
+# Env
+.env
+.env.*
+
+# Cloudflare Wrangler
+.wrangler/
+wrangler.toml
+
+# Coverage
+coverage/
+**/coverage/
+
+# Logs
+*.log
+**/*.log
+
