@@ -1,10 +1,12 @@
 name = "collepto"
 main = "worker/src/index.ts"
-compatibility_date = "2025-09-12"
+compatibility_date = "2025-08-12"
 compatibility_flags = ["nodejs_compat"]
 
 [vars]
-# ADMIN_USERNAME / ADMIN_PASSWORD должны быть заданы через Wrangler secrets или UI
+# ADMIN_USERNAME / ADMIN_PASSWORD: для быстрого запуска добавлены здесь; перенесём в secrets позже
+ADMIN_USERNAME = "admin"
+ADMIN_PASSWORD = "3d6b46s5-11a1-469b-ab9a-9b41e84ae3f0"
 BASE_URL = "https://collepto.3451881.workers.dev"
 R2_PUBLIC_URL = "https://pub-b8b2a61ea8f94c7580a7e39b14a08c8b.r2.dev"
 
@@ -22,6 +24,6 @@ binding = "PHOTOS_BUCKET"
 bucket_name = "collepto-photos"
 
 [assets]
-directory = "worker/assets"
+directory = "collepto-astro/dist"
 binding = "ASSETS"
 

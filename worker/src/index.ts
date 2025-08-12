@@ -372,7 +372,7 @@ async function serveStaticFile(c: any, filePath: string): Promise<Response | nul
       const headers = new Headers(response.headers);
       
       // Set cache headers for static assets
-      if (filePath.includes('/static/')) {
+      if (filePath.includes('/static/') || filePath.startsWith('_astro/')) {
         headers.set('Cache-Control', 'public, max-age=31536000'); // 1 year for hashed assets
       } else {
         headers.set('Cache-Control', 'public, max-age=3600'); // 1 hour for HTML
@@ -389,7 +389,7 @@ async function serveStaticFile(c: any, filePath: string): Promise<Response | nul
   return null;
 }
 
-// Serve React app static files (JS, CSS, etc.)
+// Serve static assets (support legacy /static and Astro /_astro)
 app.get('/static/*', async (c) => {
   const url = new URL(c.req.url);
   const assetPath = url.pathname.replace('/', '');
@@ -399,6 +399,14 @@ app.get('/static/*', async (c) => {
     return response;
   }
   
+  return c.notFound();
+});
+
+app.get('/_astro/*', async (c) => {
+  const url = new URL(c.req.url);
+  const assetPath = url.pathname.replace('/', '');
+  const response = await serveStaticFile(c, assetPath);
+  if (response) return response;
   return c.notFound();
 });
 
@@ -425,6 +433,12 @@ app.get('/favicon.ico', async (c) => {
   return c.notFound();
 });
 
+app.get('/favicon.svg', async (c) => {
+  const response = await serveStaticFile(c, 'favicon.svg');
+  if (response) return response;
+  return c.notFound();
+});
+
 // Serve React app for all non-API routes (SPA routing)
 app.get('/*', async (c) => {
   const url = new URL(c.req.url);
@@ -435,19 +449,23 @@ app.get('/*', async (c) => {
     return c.notFound();
   }
   
-  // Try to serve the exact file if it exists (e.g., manifest.json)
+  // Try to serve static HTML for Astro-generated routes
+  // 1) exact file (e.g., robots.txt)
   if (path.includes('.') && !path.endsWith('/')) {
-    const response = await serveStaticFile(c, path.replace('/', ''));
-    if (response) {
-      return response;
-    }
+    const exact = await serveStaticFile(c, path.slice(1));
+    if (exact) return exact;
   }
-  
-  // For all other routes, serve the React app (index.html)
-  const indexResponse = await serveStaticFile(c, 'index.html');
-  if (indexResponse) {
-    return indexResponse;
+  // 2) /foo -> foo/index.html
+  if (path !== '/') {
+    const indexLike = await serveStaticFile(c, `${path.slice(1)}/index.html`);
+    if (indexLike) return indexLike;
+    // 3) /foo -> foo.html (optional)
+    const htmlLike = await serveStaticFile(c, `${path.slice(1)}.html`);
+    if (htmlLike) return htmlLike;
   }
+  // 4) root index.html
+  const rootIndex = await serveStaticFile(c, 'index.html');
+  if (rootIndex) return rootIndex;
   
   // Fallback if React app is not built yet
   return c.html(`
