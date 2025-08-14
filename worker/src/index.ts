@@ -537,9 +537,16 @@ app.get('/admin/logout', async (c) => {
 
 app.get('/admin', async (c) => {
   if (!requireAuth(c)) return c.redirect('/admin/login');
+  // Simple stats
+  const itemsCount = (await c.env.DB.prepare('SELECT COUNT(*) as count FROM items').first())?.count || 0;
+  const blogCount = (await c.env.DB.prepare('SELECT COUNT(*) as count FROM blog_posts').first())?.count || 0;
   const body = `
     <h1>Админка</h1>
     ${adminNavHtml()}
+    <div class="grid" style="grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));">
+      <div class="card"><div class="muted">Всего предметов</div><div style="font-size:28px;font-weight:700">${itemsCount}</div></div>
+      <div class="card"><div class="muted">Всего постов</div><div style="font-size:28px;font-weight:700">${blogCount}</div></div>
+    </div>
   `;
   return c.html(layoutHtml('Админка', body));
 });
