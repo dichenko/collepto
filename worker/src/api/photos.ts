@@ -723,6 +723,36 @@ router.get('/:photoId', async (c) => {
   }
 });
 
+// PATCH update photo metadata (alt/caption)
+router.patch('/:photoId', async (c) => {
+  try {
+    const photoId = c.req.param('photoId');
+    const db = new DatabaseQueries(c.env);
+    const body = await c.req.json();
+    const alt = typeof body.alt === 'string' ? body.alt : null;
+    const caption = typeof body.caption === 'string' ? body.caption : null;
+
+    // Update fields
+    const fields: string[] = [];
+    const values: any[] = [];
+    if (alt !== null) { fields.push('alt = ?'); values.push(alt); }
+    if (caption !== null) { fields.push('caption = ?'); values.push(caption); }
+
+    if (fields.length === 0) {
+      return c.json({ success: false, error: 'No fields to update' }, 400);
+    }
+
+    values.push(photoId);
+    await c.env.DB.prepare(`UPDATE photo_assets SET ${fields.join(', ')} WHERE id = ?`).bind(...values).run();
+    await db.logAdminAction('update', 'photo', photoId, { alt, caption });
+
+    return c.json({ success: true });
+  } catch (error) {
+    console.error('Update photo metadata error:', error);
+    return c.json({ success: false, error: 'Failed to update photo metadata' }, 500);
+  }
+});
+
 // Utility function to format bytes
 function formatBytes(bytes: number): string {
   if (bytes === 0) return '0 Bytes';

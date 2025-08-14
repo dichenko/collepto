@@ -49,11 +49,11 @@ app.get('/api/items', async (c) => {
     ORDER BY created_at DESC
   `).all();
   
-  // For each item, get the first photo
+  // For each item, get up to 3 photos (exclude soft-deleted)
   const itemsWithPhotos = await Promise.all(
     (items.results || []).map(async (item) => {
       const photos = await c.env.DB.prepare(`
-        SELECT compressed_path, thumbnail_path FROM photo_assets WHERE item_id = ? LIMIT 3
+        SELECT compressed_path, thumbnail_path FROM photo_assets WHERE item_id = ? AND (deleted IS NULL OR deleted = 0) ORDER BY order_index ASC, created_at ASC LIMIT 3
       `).bind(item.id).all();
       
       // Convert file paths to public URLs - all photos are now in R2
@@ -86,9 +86,9 @@ app.get('/api/items/:id', async (c) => {
     return c.json({ success: false, error: 'Item not found' }, 404);
   }
   
-  // Get photos for this item
+  // Get photos for this item (exclude soft-deleted)
   const photos = await c.env.DB.prepare(`
-    SELECT compressed_path, thumbnail_path FROM photo_assets WHERE item_id = ?
+    SELECT compressed_path, thumbnail_path FROM photo_assets WHERE item_id = ? AND (deleted IS NULL OR deleted = 0) ORDER BY order_index ASC, created_at ASC
   `).bind(id).all();
   
   // Convert file paths to public URLs - all photos are now in R2
