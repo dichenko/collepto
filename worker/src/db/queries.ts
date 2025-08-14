@@ -345,6 +345,18 @@ export class DatabaseQueries {
     return (result as any).changes > 0;
   }
 
+  async restorePhotoAsset(id: string, updates: { compressedPath?: string; thumbnailPath?: string }): Promise<boolean> {
+    const fields: string[] = ['deleted = 0'];
+    const values: any[] = [];
+    if (updates.compressedPath) { fields.push('compressed_path = ?'); values.push(updates.compressedPath); }
+    if (updates.thumbnailPath) { fields.push('thumbnail_path = ?'); values.push(updates.thumbnailPath); }
+    values.push(id);
+    const result = await this.env.DB.prepare(`
+      UPDATE photo_assets SET ${fields.join(', ')} WHERE id = ?
+    `).bind(...values).run();
+    return (result as any).changes > 0;
+  }
+
   async getPhotosByItemIdIncludingDeleted(itemId: string): Promise<PhotoAsset[]> {
     const result = await this.env.DB.prepare(`
       SELECT id, item_id, original_path, compressed_path, thumbnail_path, filename, size, width, height, alt, caption, deleted, order_index, created_at 

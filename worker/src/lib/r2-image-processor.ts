@@ -72,6 +72,40 @@ export class R2ImageProcessor {
   }
 
   /**
+   * Сохраняет только производные варианты (compressed/thumbnail) для существующего файла
+   * @param baseFilename - исходное имя файла (для генерации путей)
+   * @param variants - массив изображений (compressed и/или thumbnail)
+   */
+  async saveDerivedVariants(baseFilename: string, variants: ImageVariant[]): Promise<Pick<ProcessedImageData, 'compressedPath' | 'thumbnailPath' | 'filename'>> {
+    const timestamp = Date.now();
+    const filenameWithoutExt = baseFilename.replace(/\.[^/.]+$/, '');
+    const ext = baseFilename.split('.').pop() || 'jpg';
+
+    const result: Partial<ProcessedImageData> = { filename: baseFilename };
+
+    for (const variant of variants) {
+      const path = this.generateFilePath(filenameWithoutExt, ext, variant.variant, timestamp);
+      await this.bucket.put(path, variant.file.stream(), {
+        httpMetadata: {
+          contentType: variant.file.type,
+        },
+      });
+
+      if (variant.variant === 'compressed') {
+        result.compressedPath = path;
+      } else if (variant.variant === 'thumbnail') {
+        result.thumbnailPath = path;
+      }
+    }
+
+    return {
+      compressedPath: result.compressedPath!,
+      thumbnailPath: result.thumbnailPath!,
+      filename: baseFilename,
+    };
+  }
+
+  /**
    * Генерирует путь к файлу в R2
    */
   private generateFilePath(filename: string, ext: string, variant: string, timestamp: number): string {

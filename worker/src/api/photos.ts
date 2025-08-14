@@ -463,6 +463,60 @@ router.delete('/:photoId', async (c) => {
   }
 });
 
+// PUT restore photo (recreate compressed/thumbnail, keep original as-is)
+router.put('/:photoId/restore', async (c) => {
+  try {
+    const photoId = c.req.param('photoId');
+    const db = new DatabaseQueries(c.env);
+
+    const photo = await db.getPhotoById(photoId);
+    if (!photo) {
+      return c.json({ success: false, error: 'Photo not found' }, 404);
+    }
+
+    const formData = await c.req.formData();
+    const compressedFile = formData.get('compressed') as File | null;
+    const thumbnailFile = formData.get('thumbnail') as File | null;
+
+    const r2Processor = new R2ImageProcessor(c.env.PHOTOS_BUCKET, c.env.R2_PUBLIC_URL);
+
+    let newCompressedPath: string | undefined;
+    let newThumbnailPath: string | undefined;
+
+    if (compressedFile || thumbnailFile) {
+      const variants: ImageVariant[] = [];
+      if (compressedFile) variants.push({ file: compressedFile, path: '', variant: 'compressed' });
+      if (thumbnailFile) variants.push({ file: thumbnailFile, path: '', variant: 'thumbnail' });
+
+      const saved = await r2Processor.saveDerivedVariants(photo.filename, variants);
+      newCompressedPath = saved.compressedPath;
+      newThumbnailPath = saved.thumbnailPath;
+    }
+
+    // Update DB: clear deleted, optionally update paths
+    await db.restorePhotoAsset(photoId, {
+      compressedPath: newCompressedPath,
+      thumbnailPath: newThumbnailPath,
+    });
+    await db.logAdminAction('restore', 'photo', photoId);
+
+    const urls = r2Processor.getImageUrls(photo.originalPath, newCompressedPath || photo.compressedPath, newThumbnailPath || photo.thumbnailPath);
+
+    return c.json({
+      success: true,
+      data: {
+        id: photoId,
+        url: urls.compressedUrl,
+        thumbnailUrl: urls.thumbnailUrl,
+        originalUrl: urls.originalUrl,
+      }
+    });
+  } catch (error) {
+    console.error('Restore photo error:', error);
+    return c.json({ success: false, error: 'Failed to restore photo' }, 500);
+  }
+});
+
 // PUT reorder photos for an item
 router.put('/item/:itemId/reorder', async (c) => {
   try {
@@ -480,6 +534,7 @@ router.put('/item/:itemId/reorder', async (c) => {
         .run();
     }
 
+    const db = new DatabaseQueries(c.env);
     await db.logAdminAction('reorder', 'photo', itemId, { photoIds });
 
     return c.json({ success: true, message: 'Photo order updated' });
@@ -517,8 +572,8 @@ router.get('/storage/stats', async (c) => {
       LIMIT 10
     `).all();
 
-    const totalPhotos = storageResult?.totalPhotos || 0;
-    const totalSize = storageResult?.totalSize || 0;
+    const totalPhotos = (storageResult as any)?.totalPhotos || 0;
+    const totalSize = (storageResult as any)?.totalSize || 0;
     
     // Cloudflare Assets limits (these are example values)
     const maxStorageBytes = 10 * 1024 * 1024 * 1024; // 10GB example limit
@@ -636,9 +691,9 @@ router.get('/:photoId', async (c) => {
     // Generate R2 URLs for all photos
     const r2Processor = new R2ImageProcessor(c.env.PHOTOS_BUCKET, c.env.R2_PUBLIC_URL);
     const imageUrls = r2Processor.getImageUrls(
-      photo.original_path,
-      photo.compressed_path,
-      photo.thumbnail_path
+      (photo as any).original_path,
+      (photo as any).compressed_path,
+      (photo as any).thumbnail_path
     );
     const publicUrl = imageUrls.compressedUrl;
     const thumbnailUrl = imageUrls.thumbnailUrl;
@@ -647,19 +702,19 @@ router.get('/:photoId', async (c) => {
     return c.json({
       success: true,
       data: {
-        id: photo.id,
-        itemId: photo.item_id,
-        filename: photo.filename,
-        size: photo.size,
-        width: photo.width,
-        height: photo.height,
+        id: (photo as any).id,
+        itemId: (photo as any).item_id,
+        filename: (photo as any).filename,
+        size: (photo as any).size,
+        width: (photo as any).width,
+        height: (photo as any).height,
         url: publicUrl,
         thumbnailUrl,
         originalUrl,
-        compressedPath: photo.compressed_path,
-        originalPath: photo.original_path,
-        thumbnailPath: photo.thumbnail_path,
-        createdAt: photo.created_at
+        compressedPath: (photo as any).compressed_path,
+        originalPath: (photo as any).original_path,
+        thumbnailPath: (photo as any).thumbnail_path,
+        createdAt: (photo as any).created_at
       }
     });
   } catch (error) {
