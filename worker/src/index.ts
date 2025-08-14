@@ -56,6 +56,7 @@ function layoutHtml(title: string, body: string): string {
     input,select,textarea{padding:8px;border:1px solid #e5e7eb;border-radius:6px}
     table{width:100%;border-collapse:collapse}
     th,td{border-bottom:1px solid #e5e7eb;padding:8px;text-align:left}
+    .admin-nav{display:flex;gap:8px;margin:8px 0 16px}
   </style>
   <meta name="description" content="Коллекция и блог Collepto" />
 </head>
@@ -497,6 +498,15 @@ function requireAuth(c: any): boolean {
   return !!match;
 }
 
+function adminNavHtml(): string {
+  return `<div class="admin-nav">
+    <a class="btn" href="/admin">Админка</a>
+    <a class="btn" href="/admin/collection">Коллекция</a>
+    <a class="btn" href="/admin/blog">Блог</a>
+    <a class="btn" href="/admin/logout">Выйти</a>
+  </div>`;
+}
+
 app.get('/admin/login', async (c) => {
   const body = `
     <h1>Вход в админку</h1>
@@ -529,7 +539,7 @@ app.get('/admin', async (c) => {
   if (!requireAuth(c)) return c.redirect('/admin/login');
   const body = `
     <h1>Админка</h1>
-    <p><a class="btn" href="/admin/collection">Коллекция</a> <a class="btn" href="/admin/blog">Блог</a> <a class="btn" href="/admin/logout">Выйти</a></p>
+    ${adminNavHtml()}
   `;
   return c.html(layoutHtml('Админка', body));
 });
@@ -555,6 +565,7 @@ app.get('/admin/collection', async (c) => {
   const items = (res.results||[]).map((it:any)=>({ ...it, tags: JSON.parse(it.tags||'[]') }));
   const body = `
     <h1>Коллекция</h1>
+    ${adminNavHtml()}
     <form method="get">
       <input name="q" value="${escapeHtml(q)}" placeholder="Поиск" />
       <input name="category" value="${escapeHtml(category)}" placeholder="Категория" />
@@ -562,7 +573,6 @@ app.get('/admin/collection', async (c) => {
       <input name="yearTo" value="${escapeHtml(yearTo||'')}" placeholder="Год до" />
       <button class="btn" type="submit">Искать</button>
       <a class="btn" href="/admin/collection/new">Добавить в коллекцию</a>
-      <a class="btn" href="/admin">Назад</a>
     </form>
     <table>
       <thead><tr><th>Название</th><th>Категория</th><th>Год</th><th></th></tr></thead>
@@ -584,6 +594,7 @@ app.get('/admin/collection/new', async (c) => {
   if (!requireAuth(c)) return c.redirect('/admin/login');
   const body = `
     <h1>Новый предмет</h1>
+    ${adminNavHtml()}
     <form onsubmit="return saveItem(event)">
       <input name="title" placeholder="Название" required />
       <input name="category" placeholder="Категория" required />
@@ -619,6 +630,7 @@ app.get('/admin/collection/:id', async (c) => {
   if (!item) return c.notFound();
   const body = `
     <h1>Редактировать: ${escapeHtml((item as any).title)}</h1>
+    ${adminNavHtml()}
     <form onsubmit="return updateItem(event)">
       <input name="title" value="${escapeHtml((item as any).title)}" required />
       <input name="category" value="${escapeHtml((item as any).category||'')}" required />
@@ -665,13 +677,13 @@ app.get('/admin/blog', async (c) => {
   const posts = res.results||[];
   const body = `
     <h1>Блог</h1>
+    ${adminNavHtml()}
     <form method="get">
       <input name="q" value="${escapeHtml(q)}" placeholder="Поиск" />
       <input name="category" value="${escapeHtml(category)}" placeholder="Категория" />
       <select name="published"><option value="">Любые</option><option ${published==='true'?'selected':''} value="true">Опубликованные</option><option ${published==='false'?'selected':''} value="false">Черновики</option></select>
       <button class="btn" type="submit">Искать</button>
       <a class="btn" href="/admin/blog/new">Новая запись</a>
-      <a class="btn" href="/admin">Назад</a>
     </form>
     <table>
       <thead><tr><th>Название</th><th>Категория</th><th>Дата</th><th>Статус</th><th></th></tr></thead>
@@ -693,6 +705,7 @@ app.get('/admin/blog/new', async (c) => {
   if (!requireAuth(c)) return c.redirect('/admin/login');
   const body = `
     <h1>Новая запись</h1>
+    ${adminNavHtml()}
     <form onsubmit="return savePost(event)">
       <input name="title" placeholder="Заголовок" required />
       <input name="category" placeholder="Категория" required />
@@ -733,6 +746,7 @@ app.get('/admin/blog/:id', async (c) => {
   if (!post) return c.notFound();
   const body = `
     <h1>Редактировать: ${escapeHtml((post as any).title)}</h1>
+    ${adminNavHtml()}
     <form onsubmit="return updatePost(event)">
       <input name="title" value="${escapeHtml((post as any).title)}" required />
       <input name="category" value="${escapeHtml((post as any).category||'')}" required />
