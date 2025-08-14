@@ -61,29 +61,26 @@ function validateImageFile(file: File): { valid: boolean; error?: string } {
   return { valid: true };
 }
 
-// POST upload photo for an item (expects pre-resized variants from client)
+// POST upload photo for an item (or tempUpload)
 router.post('/item/:itemId/upload', async (c) => {
   try {
-    const itemId = c.req.param('itemId');
-    
-    // Check if item exists
-    const db = new DatabaseQueries(c.env);
-    const item = await db.getItemById(itemId);
-    if (!item) {
-      return c.json({ success: false, error: 'Item not found' }, 404);
-    }
-
-    // Check photo limit (10 photos max per item)
-    const existingPhotos = await db.getPhotosByItemId(itemId);
-    if (existingPhotos.length >= 10) {
-      return c.json({ 
-        success: false, 
-        error: 'Maximum 10 photos allowed per item' 
-      }, 400);
-    }
-
-    // Get uploaded files (client sends 3 variants: original, compressed, thumbnail)
+    const itemIdParam = c.req.param('itemId');
     const formData = await c.req.formData();
+    const tempUploadId = (formData.get('tempUploadId') as string) || '';
+
+    const db = new DatabaseQueries(c.env);
+    let item: any = null;
+
+    if (!tempUploadId) {
+      const itemId = itemIdParam;
+      item = await db.getItemById(itemId);
+      if (!item) return c.json({ success: false, error: 'Item not found' }, 404);
+      const existingPhotos = await db.getPhotosByItemId(itemId);
+      if (existingPhotos.length >= 10) {
+        return c.json({ success: false, error: 'Maximum 10 photos allowed per item' }, 400);
+      }
+    }
+
     const originalFile = formData.get('original') as File;
     const compressedFile = formData.get('compressed') as File;
     const thumbnailFile = formData.get('thumbnail') as File;
@@ -100,44 +97,27 @@ router.post('/item/:itemId/upload', async (c) => {
     }
 
     // Validate files
-    const validationResults = [
-      { file: originalFile, name: 'original' },
-      { file: compressedFile, name: 'compressed' },
-      { file: thumbnailFile, name: 'thumbnail' }
-    ].map(({ file, name }) => ({ 
-      name, 
-      validation: validateImageFile(file) 
-    }));
-
-    const invalidFiles = validationResults.filter(r => !r.validation.valid);
-    if (invalidFiles.length > 0) {
-      return c.json({ 
-        success: false, 
-        error: `Invalid files: ${invalidFiles.map(f => `${f.name}: ${f.validation.error}`).join(', ')}` 
-      }, 400);
+    for (const f of [originalFile, compressedFile, thumbnailFile]){
+      const v = validateImageFile(f);
+      if(!v.valid){ return c.json({ success:false, error: v.error }, 400); }
     }
 
-    // Prepare variants for R2 storage
     const variants: ImageVariant[] = [
       { file: originalFile, path: '', variant: 'original' },
       { file: compressedFile, path: '', variant: 'compressed' },
       { file: thumbnailFile, path: '', variant: 'thumbnail' }
     ];
 
-    // Save to R2
     const r2Processor = new R2ImageProcessor(c.env.PHOTOS_BUCKET, c.env.R2_PUBLIC_URL);
     const processedData = await r2Processor.saveProcessedImages(variants);
-    
-    // Update with actual dimensions
     processedData.width = width || 0;
     processedData.height = height || 0;
 
-    // Default alt from item title if not provided
-    const derivedAlt = alt || item.title;
+    const altToUse = alt || (item?.title || '');
 
-    // Save to database
-    const photoId = await db.createPhotoAsset({
-      itemId,
+    const newPhotoId = await db.createPhotoAsset({
+      itemId: tempUploadId ? '' : itemIdParam,
+      tempUploadId: tempUploadId || undefined,
       originalPath: processedData.originalPath,
       compressedPath: processedData.compressedPath,
       thumbnailPath: processedData.thumbnailPath,
@@ -145,36 +125,30 @@ router.post('/item/:itemId/upload', async (c) => {
       size: processedData.size,
       width: processedData.width,
       height: processedData.height,
-      alt: derivedAlt || undefined,
+      alt: altToUse || undefined,
       caption: caption || undefined
     });
 
-    // Get URLs for response
-    const imageUrls = r2Processor.getImageUrls(
-      processedData.originalPath,
-      processedData.compressedPath,
-      processedData.thumbnailPath
-    );
-
-    return c.json({
-      success: true,
-      data: {
-        id: photoId,
-        filename: processedData.filename,
-        size: processedData.size,
-        width: processedData.width,
-        height: processedData.height,
-        url: imageUrls.compressedUrl,
-        thumbnailUrl: imageUrls.thumbnailUrl
-      }
-    }, 201);
-
+    const urls = r2Processor.getImageUrls(processedData.originalPath, processedData.compressedPath, processedData.thumbnailPath);
+    return c.json({ success:true, data: { id: newPhotoId, url: urls.compressedUrl, thumbnailUrl: urls.thumbnailUrl }}, 201);
   } catch (error) {
     console.error('Upload photo error:', error);
-    return c.json({ 
-      success: false, 
-      error: error instanceof Error ? error.message : 'Failed to upload photo' 
-    }, 500);
+    return c.json({ success:false, error: 'Failed to upload photo' }, 500);
+  }
+});
+
+// POST bind temp-uploaded photos to item after item creation
+router.post('/bind-temp', async (c) => {
+  try {
+    const { tempUploadId, itemId } = await c.req.json();
+    if (!tempUploadId || !itemId) return c.json({ success:false, error:'tempUploadId and itemId are required' }, 400);
+    const db = new DatabaseQueries(c.env);
+    await db.bindTempPhotosToItem(tempUploadId, itemId);
+    await db.logAdminAction('bind', 'photo', itemId, { tempUploadId });
+    return c.json({ success:true });
+  } catch (error) {
+    console.error('Bind temp photos error:', error);
+    return c.json({ success:false, error: 'Failed to bind temp photos' }, 500);
   }
 });
 

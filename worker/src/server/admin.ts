@@ -119,11 +119,11 @@ export function adminRoutes(app: App) {
 			<div class="row two">
 				<div class="panel">
 					<h3>Основная информация</h3>
-					<form onsubmit="return saveItem(event)">
+					<form id="itemForm" onsubmit="return saveItem(event)">
 						<input name="category" id="category" placeholder="Категория" list="category-list" autocomplete="off" required />
 						<datalist id="category-list"></datalist>
 						<input name="organization" placeholder="Организация" />
-						<input name="title" placeholder="Название" required />
+						<input name="title" id="titleInput" placeholder="Название" required />
 						<input name="description" placeholder="Краткое описание" />
 						<textarea name="fullDescription" placeholder="Подробное описание"></textarea>
 						<div class="row" style="grid-template-columns:1fr 1fr">
@@ -140,29 +140,104 @@ export function adminRoutes(app: App) {
 						<label class="muted"><input type="checkbox" name="isFeatured" /> Показать на главной</label>
 						<div style="display:flex;gap:8px">
 							<a class="btn ghost" href="/admin/collection">Отмена</a>
-							<button class="btn" type="submit">Создать предмет</button>
+							<button id="saveBtn" class="btn" type="submit" disabled>Создать предмет</button>
 						</div>
 					</form>
 				</div>
 				<div class="panel">
 					<h3>Фотографии</h3>
-					<div class="muted">Загрузка фотографий будет добавлена позже</div>
+					<div id="dropzone" style="border:2px dashed #ccc; padding:16px; text-align:center">Перетащите файлы сюда или <input id="fileInput" type="file" multiple accept="image/*" /></div>
+					<div class="muted" style="margin-top:8px">Оригинал ≤25 МБ. Будут созданы версии: 1920px JPG 80% и превью 400px.</div>
+					<div id="progress" class="muted" style="margin-top:8px"></div>
+					<div id="queueList" class="grid" style="grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:8px;margin-top:8px"></div>
 				</div>
 			</div>
 			<script>
-			(async function(){
+			const TEMP_ID = crypto.randomUUID();
+			let queue = [];
+			let uploading = 0;
+			const drop = document.getElementById('dropzone');
+			const input = document.getElementById('fileInput');
+			const saveBtn = document.getElementById('saveBtn');
+			const progress = document.getElementById('progress');
+			const titleInput = document.getElementById('titleInput');
+			const queueList = document.getElementById('queueList');
+
+			;['dragenter','dragover'].forEach(ev=>drop.addEventListener(ev,(e)=>{e.preventDefault(); drop.style.background='#f8f8f8';}))
+			;['dragleave','drop'].forEach(ev=>drop.addEventListener(ev,(e)=>{e.preventDefault(); drop.style.background='';}))
+			drop.addEventListener('drop', (e)=>{ const files = Array.from(e.dataTransfer.files||[]).filter(f=>f.type.startsWith('image/')); addToQueue(files); });
+			input.addEventListener('change', ()=>{ const files = Array.from(input.files||[]); addToQueue(files); input.value=''; });
+
+			function addToQueue(files){ queue.push(...files); renderQueue(); startUploads(); }
+			function renderQueue(){
+				queueList.innerHTML='';
+				queue.forEach((f,i)=>{
+					const el=document.createElement('div');
+					el.className='card';
+					el.innerHTML = `<div class=muted style="font-size:12px;word-break:break-all">${'${f.name}'} (${Math.round(f.size/1024)} KB)</div><div id="bar_${'${i}'}" style="height:6px;background:#eee;border-radius:4px;overflow:hidden"><div style="height:100%;width:0;background:#4caf50"></div></div>`;
+					queueList.appendChild(el);
+				});
+			}
+
+			function setProgress(i, pct){ const bar = document.querySelector(`#bar_${'${i}'} div`); if(bar) bar.style.width = pct+'%'; }
+			function updateUI(){ progress.textContent = uploading>0? ('Загрузка... файлов: '+uploading) : (queue.length? 'Ожидание загрузки' : ''); saveBtn.disabled = uploading>0; }
+
+			async function startUploads(){
+				while(queue.length){
+					const idx = 0; const file = queue.shift(); uploading++; updateUI();
+					try{
+						const {compressed, thumbnail, width, height} = await processImage(file);
+						const fd = new FormData();
+						fd.append('tempUploadId', TEMP_ID);
+						fd.append('original', file, file.name);
+						fd.append('compressed', compressed, replaceExt(file.name,'jpg'));
+						fd.append('thumbnail', thumbnail, replaceExt(file.name,'jpg'));
+						fd.append('width', String(width)); fd.append('height', String(height));
+						fd.append('alt', titleInput.value||'');
+						const res = await fetch('/api/admin/photos/item/_temp/upload',{ method:'POST', body: fd });
+						if(!res.ok){ throw new Error('upload failed'); }
+						setProgress(idx, 100);
+					}catch(e){ alert('Ошибка загрузки: '+(e.message||e)); }
+					finally{ uploading--; updateUI(); }
+				}
+			}
+
+			function replaceExt(name, ext){ return name.replace(/\.[^/.]+$/, '') + '.' + ext; }
+			function fitSize(w,h,max){ const ratio = Math.max(w,h)/max; return ratio>1? {w:Math.round(w/ratio), h:Math.round(h/ratio)} : {w,h}; }
+			async function processImage(file){
+				const img = await readImage(file);
+				const dim1920 = fitSize(img.width, img.height, 1920);
+				const dim400 = fitSize(img.width, img.height, 400);
+				const compressed = await canvasToJpeg(img, dim1920.w, dim1920.h, 0.8);
+				const thumbnail = await canvasToJpeg(img, dim400.w, dim400.h, 0.8);
+				return { compressed, thumbnail, width: img.width, height: img.height };
+			}
+			function readImage(file){
+				return new Promise((resolve,reject)=>{
+					const fr = new FileReader();
+					fr.onload = ()=>{ const img = new Image(); img.onload=()=>resolve(img); img.onerror=reject; img.src=fr.result; };
+					fr.onerror = reject; fr.readAsDataURL(file);
+				});
+			}
+			function canvasToJpeg(img,w,h,quality){
+				const canvas=document.createElement('canvas'); canvas.width=w; canvas.height=h; const ctx=canvas.getContext('2d'); ctx.drawImage(img,0,0,w,h);
+				return new Promise(resolve=>{ canvas.toBlob(b=> resolve(new File([b], 'image.jpg', { type:'image/jpeg' })), 'image/jpeg', quality); });
+			}
+
+			(async function init(){
 				try{
-					const r = await fetch('/api/admin/items/stats');
-					const j = await r.json();
+					const r = await fetch('/api/admin/items/stats'); const j = await r.json();
 					const list = document.getElementById('category-list');
 					if(j.success && j.data && Array.isArray(j.data.categories)){
 						const cats = j.data.categories.map(c=>c.category).filter(Boolean);
 						cats.forEach(c=>{ const o=document.createElement('option'); o.value=c; list.appendChild(o); });
 					}
 				}catch(e){}
+				updateUI();
 			})();
+
 			async function saveItem(e){
-				e.preventDefault();
+				e.preventDefault(); if(uploading>0){ return; }
 				const fd=new FormData(e.target.closest('form'));
 				const payload={
 					title: fd.get('title'),
@@ -180,7 +255,10 @@ export function adminRoutes(app: App) {
 					tags: String(fd.get('tags')||'').split(',').map(s=>s.trim()).filter(Boolean)
 				};
 				const res=await fetch('/api/admin/items',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});
-				const json=await res.json(); if(json.success){ location.href='/admin/collection'; } else { alert(json.error||'Save failed'); }
+				const json=await res.json(); if(json.success){
+					await fetch('/api/admin/photos/bind-temp',{ method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ tempUploadId: TEMP_ID, itemId: json.data.id }) });
+					location.href='/admin/collection';
+				} else { alert(json.error||'Save failed'); }
 			}
 			</script>
 		`;

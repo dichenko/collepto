@@ -66,6 +66,7 @@ export interface PhotoAsset {
   deleted?: boolean;
   orderIndex?: number;
   createdAt: string;
+  tempUploadId?: string;
 }
 
 export interface AuthSession {

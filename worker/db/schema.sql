@@ -43,7 +43,8 @@ CREATE TABLE IF NOT EXISTS blog_posts (
 -- Photo assets table
 CREATE TABLE IF NOT EXISTS photo_assets (
     id TEXT PRIMARY KEY,
-    item_id TEXT NOT NULL,
+    item_id TEXT,
+    temp_upload_id TEXT,
     original_path TEXT NOT NULL,
     compressed_path TEXT NOT NULL,
     thumbnail_path TEXT, -- 400px variant path
@@ -156,6 +157,7 @@ CREATE INDEX IF NOT EXISTS idx_blog_posts_publish_date ON blog_posts(publish_dat
 CREATE INDEX IF NOT EXISTS idx_blog_posts_published ON blog_posts(published);
 CREATE INDEX IF NOT EXISTS idx_blog_posts_slug ON blog_posts(slug);
 CREATE INDEX IF NOT EXISTS idx_photo_assets_item_id ON photo_assets(item_id);
+CREATE INDEX IF NOT EXISTS idx_photo_assets_temp ON photo_assets(temp_upload_id);
 CREATE INDEX IF NOT EXISTS idx_photo_assets_order ON photo_assets(item_id, order_index);
 CREATE INDEX IF NOT EXISTS idx_photo_assets_deleted ON photo_assets(deleted);
 CREATE INDEX IF NOT EXISTS idx_sessions_expires_at ON sessions(expires_at);

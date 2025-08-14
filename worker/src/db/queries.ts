@@ -295,11 +295,12 @@ export class DatabaseQueries {
     const now = new Date().toISOString();
     
     await this.env.DB.prepare(`
-      INSERT INTO photo_assets (id, item_id, original_path, compressed_path, thumbnail_path, filename, size, width, height, alt, caption, deleted, order_index, created_at)
+      INSERT INTO photo_assets (id, item_id, temp_upload_id, original_path, compressed_path, thumbnail_path, filename, size, width, height, alt, caption, deleted, order_index, created_at)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).bind(
       id, 
-      photo.itemId, 
+      photo.itemId || null,
+      photo.tempUploadId || null,
       photo.originalPath, 
       photo.compressedPath, 
       photo.thumbnailPath,
@@ -389,6 +390,39 @@ export class DatabaseQueries {
     `).bind(id).run();
 
     return (result as any).changes > 0;
+  }
+
+  async bindTempPhotosToItem(tempUploadId: string, itemId: string): Promise<void> {
+    await this.env.DB.prepare(`
+      UPDATE photo_assets SET item_id = ?, temp_upload_id = NULL WHERE temp_upload_id = ?
+    `).bind(itemId, tempUploadId).run();
+  }
+
+  async getPhotosByTempUploadId(tempUploadId: string): Promise<PhotoAsset[]> {
+    const result = await this.env.DB.prepare(`
+      SELECT id, item_id, temp_upload_id, original_path, compressed_path, thumbnail_path, filename, size, width, height, alt, caption, deleted, order_index, created_at 
+      FROM photo_assets 
+      WHERE temp_upload_id = ? AND (deleted IS NULL OR deleted = 0)
+      ORDER BY created_at ASC
+    `).bind(tempUploadId).all();
+    const rows = (result.results || []) as any[];
+    return rows.map((r: any) => ({
+      id: r.id,
+      itemId: r.item_id,
+      tempUploadId: r.temp_upload_id || undefined,
+      originalPath: r.original_path,
+      compressedPath: r.compressed_path,
+      thumbnailPath: r.thumbnail_path,
+      filename: r.filename,
+      size: r.size,
+      width: r.width,
+      height: r.height,
+      alt: r.alt || undefined,
+      caption: r.caption || undefined,
+      deleted: Boolean(r.deleted),
+      orderIndex: r.order_index,
+      createdAt: r.created_at,
+    }));
   }
 
   // Slug-based queries
