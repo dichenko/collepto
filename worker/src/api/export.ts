@@ -1,10 +1,11 @@
 import { Hono } from 'hono';
-import type { Env, ExportData } from '../types';
+import type { Env } from '../types';
 import { DatabaseQueries } from '../db/queries';
+import JSZip from 'jszip';
 
 const router = new Hono<{ Bindings: Env }>();
 
-// GET export collection as CSV + photo archive
+// GET export collection as CSV + photo archive (metadata)
 router.get('/', async (c) => {
   try {
     const db = new DatabaseQueries(c.env);
@@ -13,25 +14,19 @@ router.get('/', async (c) => {
     const items = await db.getAllItems();
     const posts = await db.getAllBlogPosts();
     
-    // Get all photos for all items
-    const allPhotos = [];
+    // Get all photos for all items (including deleted)
+    let totalPhotos = 0;
     for (const item of items) {
       const photos = await db.getPhotosByItemIdIncludingDeleted(item.id);
-      allPhotos.push(...photos);
+      totalPhotos += photos.length;
     }
-
-    const exportData: ExportData = {
-      items,
-      posts,
-      photos: allPhotos
-    };
 
     return c.json({
       success: true,
       data: {
         totalItems: items.length,
         totalPosts: posts.length,
-        totalPhotos: allPhotos.length,
+        totalPhotos,
         exportUrl: '/api/admin/export/download'
       }
     });
@@ -50,31 +45,44 @@ router.get('/download', async (c) => {
     // Get all data
     const items = await db.getAllItems();
     const posts = await db.getAllBlogPosts();
-    
-    // Create CSV data for items
-    const itemsCsv = await generateItemsCsv(items, db);
-    
-    // Create CSV data for blog posts
-    const postsCsv = await generatePostsCsv(posts);
-    
-    // For now, return CSV data as JSON (in a real implementation, you'd create a zip file)
-    // TODO: Implement actual ZIP file creation with photos and CSV files
-    
-    const exportData = {
-      items_csv: itemsCsv,
-      posts_csv: postsCsv,
-      timestamp: new Date().toISOString(),
-      total_items: items.length,
-      total_posts: posts.length
-    };
 
-    // Set headers for file download
+    // CSV content
+    const itemsCsv = await generateItemsCsv(items, db);
+    const postsCsv = await generatePostsCsv(posts);
+
+    // Build ZIP
+    const zip = new JSZip();
+    zip.file('items.csv', itemsCsv);
+    zip.file('posts.csv', postsCsv);
+
+    // Photos folder: include ALL originals (including deleted)
+    const photosFolder = zip.folder('photos');
+    for (const item of items) {
+      const photos = await db.getPhotosByItemIdIncludingDeleted(item.id);
+      for (const photo of photos) {
+        if (!photo.originalPath) continue;
+        const object = await c.env.PHOTOS_BUCKET.get(photo.originalPath);
+        if (object) {
+          const arrayBuffer = await object.arrayBuffer();
+          // имя файла в архиве: <itemId>/<originalFilename>
+          const itemFolder = photosFolder?.folder(String(item.id));
+          itemFolder?.file(photo.filename, arrayBuffer);
+        }
+      }
+    }
+
+    const zipBuffer = await zip.generateAsync({ type: 'uint8array' });
+
     const timestamp = new Date().toISOString().split('T')[0];
-    const filename = `collepto_export_${timestamp}.json`;
-    
-    return c.json(exportData, 200, {
-      'Content-Disposition': `attachment; filename="${filename}"`,
-      'Content-Type': 'application/json'
+    const filename = `collepto_export_${timestamp}.zip`;
+
+    return new Response(zipBuffer, {
+      status: 200,
+      headers: {
+        'Content-Type': 'application/zip',
+        'Content-Disposition': `attachment; filename="${filename}"`,
+        'Cache-Control': 'no-store',
+      },
     });
     
   } catch (error) {
