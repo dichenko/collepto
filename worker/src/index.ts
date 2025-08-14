@@ -659,8 +659,28 @@ app.get('/admin/collection/new', async (c) => {
           </select>
           <input name="title" placeholder="Название" required />
           <input name="year" type="number" placeholder="Год" required />
+          <div class="row" style="grid-template-columns:1fr 1fr">
+            <input name="yearFrom" type="number" placeholder="Год (от)" />
+            <input name="yearTo" type="number" placeholder="Год (до)" />
+          </div>
           <textarea name="description" placeholder="Короткое описание"></textarea>
+          <textarea name="fullDescription" placeholder="Подробное описание"></textarea>
+          <div class="row" style="grid-template-columns:1fr 1fr">
+            <input name="country" placeholder="Страна" />
+            <input name="organization" placeholder="Организация" />
+          </div>
+          <div class="row" style="grid-template-columns:1fr 1fr 1fr">
+            <input name="size" placeholder="Размер" />
+            <input name="edition" placeholder="Тираж/Издание" />
+            <input name="series" placeholder="Серия" />
+          </div>
+          <div class="row" style="grid-template-columns:1fr 1fr 1fr">
+            <input name="condition" placeholder="Состояние" />
+            <input name="acquisition" placeholder="Место/время приобретения" />
+            <input name="value" placeholder="Оценочная стоимость" />
+          </div>
           <input name="tags" placeholder="Теги, через запятую" />
+          <label class="muted"><input type="checkbox" name="isFeatured" /> Показать на главной</label>
           <div style="display:flex;gap:8px">
             <a class="btn ghost" href="/admin/collection">Отмена</a>
             <button class="btn" type="submit">Создать предмет</button>
@@ -680,7 +700,19 @@ app.get('/admin/collection/new', async (c) => {
           title: fd.get('title'),
           category: fd.get('category'),
           year: Number(fd.get('year')),
+          yearFrom: fd.get('yearFrom')? Number(fd.get('yearFrom')): undefined,
+          yearTo: fd.get('yearTo')? Number(fd.get('yearTo')): undefined,
           description: fd.get('description')||'',
+          fullDescription: fd.get('fullDescription')||'',
+          country: fd.get('country')||'',
+          organization: fd.get('organization')||'',
+          size: fd.get('size')||'',
+          edition: fd.get('edition')||'',
+          series: fd.get('series')||'',
+          condition: fd.get('condition')||'',
+          acquisition: fd.get('acquisition')||'',
+          value: fd.get('value')||'',
+          isFeatured: fd.get('isFeatured')==='on',
           tags: String(fd.get('tags')||'').split(',').map(s=>s.trim()).filter(Boolean)
         };
         const res=await fetch('/api/admin/items',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});
