@@ -10,6 +10,7 @@ import { authRouter } from './api/auth';
 import { DatabaseQueries } from './db/queries';
 
 import type { Env } from './types';
+import { GLOBAL_CSS } from './styles';
 
 // No longer needed - KV stores binary data directly
 
@@ -41,6 +42,7 @@ function layoutHtml(title: string, body: string): string {
   <title>${escapeHtml(title)}</title>
   <link rel="icon" href="/favicon.svg" />
   <style>
+    ${GLOBAL_CSS}
     :root{--bg:#f6f7fb;--card:#fff;--muted:#6b7280;--text:#111827;--primary:#111827;--primary-2:#1f2937;--brand:#111827;--line:#e5e7eb;--chip:#111827;--chip-bg:#f1f5f9}
     *{box-sizing:border-box}
     body{font-family:Inter,system-ui,-apple-system,Segoe UI,Roboto,Ubuntu,Cantarell,Noto Sans,sans-serif;margin:0;color:var(--text);background:var(--bg)}
