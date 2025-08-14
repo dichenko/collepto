@@ -39,3 +39,6 @@ coverage/
 *.log
 **/*.log
 
+# archive
+.archive/
+
