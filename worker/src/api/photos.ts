@@ -132,6 +132,9 @@ router.post('/item/:itemId/upload', async (c) => {
     processedData.width = width || 0;
     processedData.height = height || 0;
 
+    // Default alt from item title if not provided
+    const derivedAlt = alt || item.title;
+
     // Save to database
     const photoId = await db.createPhotoAsset({
       itemId,
@@ -142,7 +145,7 @@ router.post('/item/:itemId/upload', async (c) => {
       size: processedData.size,
       width: processedData.width,
       height: processedData.height,
-      alt: alt || undefined,
+      alt: derivedAlt || undefined,
       caption: caption || undefined
     });
 
@@ -281,7 +284,7 @@ router.post('/item/:itemId/upload-multiple', async (c) => {
           size: processedData.size,
           width: processedData.width,
           height: processedData.height,
-          alt: photoSet.alt || undefined,
+          alt: (photoSet.alt || item.title) || undefined,
           caption: photoSet.caption || undefined
         });
 
@@ -389,7 +392,7 @@ router.post('/item/:itemId/upload-both', async (c) => {
     processedData.width = 1920; // Default assumption
     processedData.height = 1080;
 
-    // Save to database
+    // Save to database (alt default from item title)
     const photoId = await db.createPhotoAsset({
       itemId,
       originalPath: processedData.originalPath,
@@ -398,7 +401,8 @@ router.post('/item/:itemId/upload-both', async (c) => {
       filename: processedData.filename,
       size: processedData.size,
       width: processedData.width,
-      height: processedData.height
+      height: processedData.height,
+      alt: item.title
     });
 
     // Get URLs for response
