@@ -50,12 +50,16 @@ export function adminRoutes(app: App) {
 		if (!requireAuth(c)) return c.redirect('/admin/login');
 		const itemsCount = (await c.env.DB.prepare('SELECT COUNT(*) as count FROM items').first() as any)?.count || 0;
 		const blogCount = (await c.env.DB.prepare('SELECT COUNT(*) as count FROM blog_posts').first() as any)?.count || 0;
+		const stats = await fetch(new URL('/api/admin/photos/storage/stats', c.req.url), { headers: { Cookie: c.req.header('Cookie')||'' } }).then(r=>r.json()).catch(()=>({ success:false })) as any;
+		const usage = stats?.success ? stats.data.usagePercentage : 0;
+		const totalSize = stats?.success ? stats.data.totalSizeFormatted : 'n/a';
 		const body = `
 			<h1>Админка</h1>
 			${adminNavHtml()}
 			<div class="grid" style="grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));">
 				<div class="card"><div class="muted">Всего предметов</div><div style="font-size:28px;font-weight:700">${itemsCount}</div></div>
 				<div class="card"><div class="muted">Всего постов</div><div style="font-size:28px;font-weight:700">${blogCount}</div></div>
+				<div class="card"><div class="muted">Хранилище фото</div><div style="font-size:20px;font-weight:700">${usage}%</div><div class="muted">Использовано: ${escapeHtml(String(totalSize))}</div></div>
 			</div>
 		`;
 		return c.html(`<style>${SHELL_CSS}</style>${shell(body)}`);
@@ -201,6 +205,25 @@ export function adminRoutes(app: App) {
 			<button class="btn" type="submit">Сохранить</button>
 			<a class="btn" href="/admin/collection">Назад</a>
 		  </form>
+		  <div class="row two" style="margin-top:16px">
+			<div class="panel">
+				<h3>Фотографии предмета</h3>
+				<div id="photos-list" class="grid" style="grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 12px;"></div>
+				<div style="margin-top:12px; display:flex; gap:8px">
+					<button class="btn" onclick="saveOrder()">Сохранить порядок</button>
+					<button class="btn ghost" onclick="reloadPhotos()">Обновить список</button>
+				</div>
+			</div>
+			<div class="panel">
+				<h3>Загрузка фотографий</h3>
+				<div id="dropzone" style="border:2px dashed #ccc; padding:16px; text-align:center">Перетащите файлы сюда или <input id="fileInput" type="file" multiple accept="image/*" /></div>
+				<div class="muted" style="margin-top:8px">Оригинал ≤25 МБ. Будут созданы версии: 1920px JPG 80% и превью 400px.</div>
+				<div style="margin-top:12px; display:flex; gap:8px">
+					<button class="btn" onclick="uploadQueued()">Загрузить выбранные</button>
+					<div id="uploadStatus" class="muted"></div>
+				</div>
+			</div>
+		  </div>
 		  <script>
 		  async function updateItem(e){
 			e.preventDefault();
@@ -214,6 +237,127 @@ export function adminRoutes(app: App) {
 			const res=await fetch('/api/admin/items/${'${encodeURIComponent(id)}'}',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});
 			const json=await res.json(); if(json.success){ location.href='/admin/collection'; } else { alert(json.error||'Save failed'); }
 		  }
+
+		  const ITEM_ID = ${JSON.stringify(String(id))};
+		  const ITEM_TITLE = ${JSON.stringify(String((item as any).title||''))};
+		  let currentPhotos = [];
+		  let queue = [];
+
+		  async function loadPhotos(){
+			const r = await fetch('/api/admin/photos/item/'+encodeURIComponent(ITEM_ID));
+			const j = await r.json();
+			if(j.success){ currentPhotos = j.data||[]; renderPhotos(); }
+		  }
+		  function renderPhotos(){
+			const root = document.getElementById('photos-list');
+			root.innerHTML = '';
+			currentPhotos.forEach((p, idx) => {
+			  const el = document.createElement('div');
+			  el.className = 'card';
+			  el.innerHTML = `
+				<div style="display:flex; gap:8px; align-items:center">
+				  <img src="${'${p.thumbnailUrl||p.url}'}" alt="" style="width:80px;height:80px;object-fit:cover;border-radius:6px"/>
+				  <div style="flex:1">
+				    <input data-id="${'${p.id}'}" data-field="alt" placeholder="alt" value="${'${p.alt||""}'}" />
+				    <input data-id="${'${p.id}'}" data-field="caption" placeholder="caption" value="${'${p.caption||""}'}" />
+				    <div class="muted" style="font-size:12px;word-break:break-all">${'${p.filename||""}'}</div>
+				  </div>
+				</div>
+				<div style="display:flex; gap:6px; margin-top:8px">
+				  <button class="btn ghost" onclick="moveUp(${idx})">↑</button>
+				  <button class="btn ghost" onclick="moveDown(${idx})">↓</button>
+				  <button class="btn" onclick="saveMeta('${'${p.id}'}')">Сохранить</button>
+				  <button class="btn danger" onclick="removePhoto('${'${p.id}'}')">Удалить</button>
+				</div>
+			  `;
+			  root.appendChild(el);
+			});
+		  }
+		  function moveUp(i){ if(i<=0) return; const t=currentPhotos[i-1]; currentPhotos[i-1]=currentPhotos[i]; currentPhotos[i]=t; renderPhotos(); }
+		  function moveDown(i){ if(i>=currentPhotos.length-1) return; const t=currentPhotos[i+1]; currentPhotos[i+1]=currentPhotos[i]; currentPhotos[i]=t; renderPhotos(); }
+		  async function saveOrder(){
+			const ids = currentPhotos.map(p=>p.id);
+			await fetch('/api/admin/photos/item/'+encodeURIComponent(ITEM_ID)+'/reorder',{method:'PUT',headers:{'Content-Type':'application/json'},body: JSON.stringify({ photoIds: ids })});
+			alert('Порядок сохранён');
+		  }
+		  async function saveMeta(id){
+			const inputs = Array.from(document.querySelectorAll(`[data-id="${'${id}'}"]`));
+			const alt = inputs.find(i=>i.getAttribute('data-field')==='alt')?.value||'';
+			const caption = inputs.find(i=>i.getAttribute('data-field')==='caption')?.value||'';
+			await fetch('/api/admin/photos/'+encodeURIComponent(id),{ method:'PATCH', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ alt, caption })});
+			alert('Сохранено');
+		  }
+		  async function removePhoto(id){
+			if(!confirm('Удалить фото? Сжатые версии будут удалены, оригинал сохранится для экспорта.')) return;
+			await fetch('/api/admin/photos/'+encodeURIComponent(id),{ method:'DELETE' });
+			await loadPhotos();
+		  }
+		  function reloadPhotos(){ loadPhotos(); }
+
+		  // Uploader with client-side processing
+		  const drop = document.getElementById('dropzone');
+		  const input = document.getElementById('fileInput');
+		  const statusEl = document.getElementById('uploadStatus');
+		  ;['dragenter','dragover'].forEach(ev=>drop.addEventListener(ev,(e)=>{e.preventDefault(); drop.style.background='#f8f8f8';}))
+		  ;['dragleave','drop'].forEach(ev=>drop.addEventListener(ev,(e)=>{e.preventDefault(); drop.style.background='';}))
+		  drop.addEventListener('drop', async (e)=>{ const files = Array.from(e.dataTransfer.files||[]).filter(f=>f.type.startsWith('image/')); queue.push(...files); statusEl.textContent = 'В очереди файлов: '+queue.length; });
+		  input.addEventListener('change', ()=>{ const files = Array.from(input.files||[]); queue.push(...files); input.value=''; statusEl.textContent = 'В очереди файлов: '+queue.length; });
+
+		  async function uploadQueued(){
+			if(queue.length===0){ alert('Нет файлов'); return; }
+			statusEl.textContent = 'Обработка изображений...';
+			const form = new FormData();
+			let idx=0;
+			for(const file of queue){
+			  const {compressed, thumbnail, width, height} = await processImage(file);
+			  form.append(`photo_${idx}_original`, file, file.name);
+			  form.append(`photo_${idx}_compressed`, compressed, replaceExt(file.name,'jpg'));
+			  form.append(`photo_${idx}_thumbnail`, thumbnail, replaceExt(file.name,'jpg'));
+			  form.append(`photo_${idx}_width`, String(width));
+			  form.append(`photo_${idx}_height`, String(height));
+			  form.append(`photo_${idx}_filename`, file.name);
+			  form.append(`photo_${idx}_alt`, ITEM_TITLE);
+			  idx++;
+			}
+			statusEl.textContent = 'Загрузка...';
+			const res = await fetch('/api/admin/photos/item/'+encodeURIComponent(ITEM_ID)+'/upload-multiple',{ method:'POST', body: form });
+			const j = await res.json();
+			if(!j.success){ alert('Загружено с ошибками'); }
+			queue = [];
+			statusEl.textContent = 'Готово';
+			await loadPhotos();
+		  }
+
+		  function replaceExt(name, ext){ return name.replace(/\.[^/.]+$/, '') + '.' + ext; }
+		  function fitSize(w,h,max){ const ratio = Math.max(w,h)/max; return ratio>1? {w:Math.round(w/ratio), h:Math.round(h/ratio)} : {w,h}; }
+		  async function processImage(file){
+			const img = await readImage(file);
+			const dim1920 = fitSize(img.width, img.height, 1920);
+			const dim400 = fitSize(img.width, img.height, 400);
+			const compressed = await canvasToJpeg(img, dim1920.w, dim1920.h, 0.8);
+			const thumbnail = await canvasToJpeg(img, dim400.w, dim400.h, 0.8);
+			return { compressed, thumbnail, width: img.width, height: img.height };
+		  }
+		  function readImage(file){
+			return new Promise((resolve,reject)=>{
+			  const fr = new FileReader();
+			  fr.onload = ()=>{
+				const img = new Image();
+				img.onload = ()=> resolve(img);
+				img.onerror = reject;
+				img.src = fr.result;
+			  };
+			  fr.onerror = reject;
+			  fr.readAsDataURL(file);
+			});
+		  }
+		  function canvasToJpeg(img,w,h,quality){
+			const canvas = document.createElement('canvas'); canvas.width=w; canvas.height=h;
+			const ctx = canvas.getContext('2d'); ctx.drawImage(img,0,0,w,h);
+			return new Promise(resolve=>{ canvas.toBlob(b=> resolve(new File([b], 'image.jpg', { type:'image/jpeg' })), 'image/jpeg', quality); });
+		  }
+
+		  loadPhotos();
 		  </script>
 		`;
 		return c.html(`<style>${SHELL_CSS}</style>${shell(body)}`);
