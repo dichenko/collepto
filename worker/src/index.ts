@@ -648,37 +648,22 @@ app.get('/admin/collection/new', async (c) => {
       <div class="panel">
         <h3>Основная информация</h3>
         <form onsubmit="return saveItem(event)">
-          <select name="category" required>
-            <option value="">Выберите категорию</option>
-            <option>Vintage Cameras</option>
-            <option>Vinyl Records</option>
-            <option>Comic Books</option>
-            <option>Vintage Watches</option>
-            <option>Tech</option>
-            <option>Accessories</option>
-          </select>
+          <input name="category" id="category" placeholder="Категория" list="category-list" autocomplete="off" required />
+          <datalist id="category-list"></datalist>
+          <input name="organization" placeholder="Организация" />
           <input name="title" placeholder="Название" required />
-          <input name="year" type="number" placeholder="Год" required />
-          <div class="row" style="grid-template-columns:1fr 1fr">
-            <input name="yearFrom" type="number" placeholder="Год (от)" />
-            <input name="yearTo" type="number" placeholder="Год (до)" />
-          </div>
-          <textarea name="description" placeholder="Короткое описание"></textarea>
+          <input name="description" placeholder="Краткое описание" />
           <textarea name="fullDescription" placeholder="Подробное описание"></textarea>
           <div class="row" style="grid-template-columns:1fr 1fr">
             <input name="country" placeholder="Страна" />
-            <input name="organization" placeholder="Организация" />
+            <input name="size" placeholder="Размер" />
           </div>
           <div class="row" style="grid-template-columns:1fr 1fr 1fr">
-            <input name="size" placeholder="Размер" />
             <input name="edition" placeholder="Тираж/Издание" />
             <input name="series" placeholder="Серия" />
-          </div>
-          <div class="row" style="grid-template-columns:1fr 1fr 1fr">
             <input name="condition" placeholder="Состояние" />
-            <input name="acquisition" placeholder="Место/время приобретения" />
-            <input name="value" placeholder="Оценочная стоимость" />
           </div>
+          <input name="year" type="number" placeholder="Год" />
           <input name="tags" placeholder="Теги, через запятую" />
           <label class="muted"><input type="checkbox" name="isFeatured" /> Показать на главной</label>
           <div style="display:flex;gap:8px">
@@ -693,15 +678,25 @@ app.get('/admin/collection/new', async (c) => {
       </div>
     </div>
     <script>
+      // Подсказки категорий из БД
+      (async function(){
+        try{
+          const r = await fetch('/api/admin/items/stats');
+          const j = await r.json();
+          const list = document.getElementById('category-list');
+          if(j.success && j.data && Array.isArray(j.data.categories)){
+            const cats = j.data.categories.map(c=>c.category).filter(Boolean);
+            cats.forEach(c=>{ const o=document.createElement('option'); o.value=c; list.appendChild(o); });
+          }
+        }catch(e){}
+      })();
+
       async function saveItem(e){
         e.preventDefault();
         const fd=new FormData(e.target.closest('form'));
         const payload={
           title: fd.get('title'),
           category: fd.get('category'),
-          year: Number(fd.get('year')),
-          yearFrom: fd.get('yearFrom')? Number(fd.get('yearFrom')): undefined,
-          yearTo: fd.get('yearTo')? Number(fd.get('yearTo')): undefined,
           description: fd.get('description')||'',
           fullDescription: fd.get('fullDescription')||'',
           country: fd.get('country')||'',
@@ -710,8 +705,7 @@ app.get('/admin/collection/new', async (c) => {
           edition: fd.get('edition')||'',
           series: fd.get('series')||'',
           condition: fd.get('condition')||'',
-          acquisition: fd.get('acquisition')||'',
-          value: fd.get('value')||'',
+          year: fd.get('year')? Number(fd.get('year')): undefined,
           isFeatured: fd.get('isFeatured')==='on',
           tags: String(fd.get('tags')||'').split(',').map(s=>s.trim()).filter(Boolean)
         };
