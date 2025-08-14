@@ -50,6 +50,12 @@ function layoutHtml(title: string, body: string): string {
     a:hover{text-decoration:underline}
     nav{display:flex;gap:12px;margin-bottom:16px}
     img{max-width:100%;height:auto;border-radius:6px}
+    .btn{display:inline-block;background:#2563eb;color:#fff;border-radius:8px;padding:8px 12px;text-decoration:none}
+    .btn:hover{background:#1d4ed8}
+    form{display:grid;gap:8px}
+    input,select,textarea{padding:8px;border:1px solid #e5e7eb;border-radius:6px}
+    table{width:100%;border-collapse:collapse}
+    th,td{border-bottom:1px solid #e5e7eb;padding:8px;text-align:left}
   </style>
   <meta name="description" content="Коллекция и блог Collepto" />
 </head>
@@ -482,6 +488,281 @@ app.get('/blog/:slug', async (c) => {
   } catch {
     return c.html(layoutHtml('Пост — Collepto', '<p>Ошибка загрузки.</p>'));
   }
+});
+
+// ========== Admin Area ==========
+function requireAuth(c: any): boolean {
+  const cookie = c.req.header('Cookie') || '';
+  const match = cookie.match(/(?:^|;\s*)sessionId=([^;]+)/);
+  return !!match;
+}
+
+app.get('/admin/login', async (c) => {
+  const body = `
+    <h1>Вход в админку</h1>
+    <form method="post" action="/admin/login" onsubmit="return login(event)">
+      <input name="username" placeholder="Username" required />
+      <input name="password" type="password" placeholder="Password" required />
+      <label class="muted"><input type="checkbox" name="remember" checked /> Запомнить</label>
+      <button class="btn" type="submit">Войти</button>
+    </form>
+    <script>
+      async function login(e){
+        e.preventDefault();
+        const fd = new FormData(e.target);
+        const payload = { username: fd.get('username'), password: fd.get('password'), remember: fd.get('remember')==='on' };
+        const res = await fetch('/api/auth/login', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(payload) });
+        const json = await res.json();
+        if(json.success){ location.href = '/admin'; } else { alert(json.error||'Login failed'); }
+      }
+    </script>
+  `;
+  return c.html(layoutHtml('Вход — Admin', body));
+});
+
+app.get('/admin/logout', async (c) => {
+  await fetch(new URL('/api/auth/logout', c.req.url), { method:'POST', headers: { Cookie: c.req.header('Cookie')||'' } });
+  return c.redirect('/admin/login');
+});
+
+app.get('/admin', async (c) => {
+  if (!requireAuth(c)) return c.redirect('/admin/login');
+  const body = `
+    <h1>Админка</h1>
+    <p><a class="btn" href="/admin/collection">Коллекция</a> <a class="btn" href="/admin/blog">Блог</a> <a class="btn" href="/admin/logout">Выйти</a></p>
+  `;
+  return c.html(layoutHtml('Админка', body));
+});
+
+// Admin: Collection list with filters
+app.get('/admin/collection', async (c) => {
+  if (!requireAuth(c)) return c.redirect('/admin/login');
+  const url = new URL(c.req.url);
+  const q = url.searchParams.get('q') || '';
+  const category = url.searchParams.get('category') || '';
+  const yearFrom = url.searchParams.get('yearFrom');
+  const yearTo = url.searchParams.get('yearTo');
+  const params: any[] = [];
+  let sql = q
+    ? `SELECT items.* FROM items_fts JOIN items ON items_fts.rowid = items.rowid WHERE items_fts MATCH ?`
+    : 'SELECT * FROM items WHERE 1=1';
+  if (q) params.push(q);
+  if (category) { sql += ' AND category = ?'; params.push(category); }
+  if (yearFrom) { sql += ' AND year >= ?'; params.push(parseInt(yearFrom)); }
+  if (yearTo) { sql += ' AND year <= ?'; params.push(parseInt(yearTo)); }
+  sql += ' ORDER BY created_at DESC LIMIT 100';
+  const res = await c.env.DB.prepare(sql).bind(...params).all();
+  const items = (res.results||[]).map((it:any)=>({ ...it, tags: JSON.parse(it.tags||'[]') }));
+  const body = `
+    <h1>Коллекция</h1>
+    <form method="get">
+      <input name="q" value="${escapeHtml(q)}" placeholder="Поиск" />
+      <input name="category" value="${escapeHtml(category)}" placeholder="Категория" />
+      <input name="yearFrom" value="${escapeHtml(yearFrom||'')}" placeholder="Год от" />
+      <input name="yearTo" value="${escapeHtml(yearTo||'')}" placeholder="Год до" />
+      <button class="btn" type="submit">Искать</button>
+      <a class="btn" href="/admin/collection/new">Добавить в коллекцию</a>
+      <a class="btn" href="/admin">Назад</a>
+    </form>
+    <table>
+      <thead><tr><th>Название</th><th>Категория</th><th>Год</th><th></th></tr></thead>
+      <tbody>
+        ${items.map((i:any)=>`<tr>
+          <td>${escapeHtml(i.title)}</td>
+          <td>${escapeHtml(i.category||'')}</td>
+          <td>${i.year??''}</td>
+          <td><a class="btn" href="/admin/collection/${encodeURIComponent(i.id)}">Редактировать</a></td>
+        </tr>`).join('')}
+      </tbody>
+    </table>
+  `;
+  return c.html(layoutHtml('Админка — Коллекция', body));
+});
+
+// Admin: Collection new/edit forms
+app.get('/admin/collection/new', async (c) => {
+  if (!requireAuth(c)) return c.redirect('/admin/login');
+  const body = `
+    <h1>Новый предмет</h1>
+    <form onsubmit="return saveItem(event)">
+      <input name="title" placeholder="Название" required />
+      <input name="category" placeholder="Категория" required />
+      <input name="year" type="number" placeholder="Год" required />
+      <textarea name="description" placeholder="Короткое описание"></textarea>
+      <input name="tags" placeholder="Теги, через запятую" />
+      <button class="btn" type="submit">Сохранить</button>
+      <a class="btn" href="/admin/collection">Отмена</a>
+    </form>
+    <script>
+      async function saveItem(e){
+        e.preventDefault();
+        const fd=new FormData(e.target);
+        const payload={
+          title: fd.get('title'),
+          category: fd.get('category'),
+          year: Number(fd.get('year')),
+          description: fd.get('description')||'',
+          tags: String(fd.get('tags')||'').split(',').map(s=>s.trim()).filter(Boolean)
+        };
+        const res=await fetch('/api/admin/items',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});
+        const json=await res.json(); if(json.success){ location.href='/admin/collection'; } else { alert(json.error||'Save failed'); }
+      }
+    </script>
+  `;
+  return c.html(layoutHtml('Новый предмет — Админка', body));
+});
+
+app.get('/admin/collection/:id', async (c) => {
+  if (!requireAuth(c)) return c.redirect('/admin/login');
+  const id = c.req.param('id');
+  const item = await c.env.DB.prepare('SELECT * FROM items WHERE id = ?').bind(id).first();
+  if (!item) return c.notFound();
+  const body = `
+    <h1>Редактировать: ${escapeHtml((item as any).title)}</h1>
+    <form onsubmit="return updateItem(event)">
+      <input name="title" value="${escapeHtml((item as any).title)}" required />
+      <input name="category" value="${escapeHtml((item as any).category||'')}" required />
+      <input name="year" type="number" value="${(item as any).year||''}" required />
+      <textarea name="description">${escapeHtml((item as any).description||'')}</textarea>
+      <input name="tags" value="${escapeHtml(((item as any).tags||'[]').toString())}" placeholder="[теги] игнорируется" />
+      <button class="btn" type="submit">Сохранить</button>
+      <a class="btn" href="/admin/collection">Назад</a>
+    </form>
+    <script>
+      async function updateItem(e){
+        e.preventDefault();
+        const fd=new FormData(e.target);
+        const payload={
+          title: fd.get('title'),
+          category: fd.get('category'),
+          year: Number(fd.get('year')),
+          description: fd.get('description')||''
+        };
+        const res=await fetch('/api/admin/items/${encodeURIComponent(id)}',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});
+        const json=await res.json(); if(json.success){ location.href='/admin/collection'; } else { alert(json.error||'Save failed'); }
+      }
+    </script>
+  `;
+  return c.html(layoutHtml('Редактирование предмета — Админка', body));
+});
+
+// Admin: Blog list
+app.get('/admin/blog', async (c) => {
+  if (!requireAuth(c)) return c.redirect('/admin/login');
+  const url = new URL(c.req.url);
+  const q = url.searchParams.get('q') || '';
+  const category = url.searchParams.get('category') || '';
+  const published = url.searchParams.get('published');
+  const params:any[]=[];
+  let sql = q
+    ? `SELECT blog_posts.* FROM blog_posts_fts JOIN blog_posts ON blog_posts_fts.rowid = blog_posts.rowid WHERE blog_posts_fts MATCH ?`
+    : 'SELECT * FROM blog_posts WHERE 1=1';
+  if (q) params.push(q);
+  if (category) { sql += ' AND category = ?'; params.push(category); }
+  if (published) { sql += ' AND published = ?'; params.push(published==='true'?1:0); }
+  sql += ' ORDER BY publish_date DESC LIMIT 100';
+  const res = await c.env.DB.prepare(sql).bind(...params).all();
+  const posts = res.results||[];
+  const body = `
+    <h1>Блог</h1>
+    <form method="get">
+      <input name="q" value="${escapeHtml(q)}" placeholder="Поиск" />
+      <input name="category" value="${escapeHtml(category)}" placeholder="Категория" />
+      <select name="published"><option value="">Любые</option><option ${published==='true'?'selected':''} value="true">Опубликованные</option><option ${published==='false'?'selected':''} value="false">Черновики</option></select>
+      <button class="btn" type="submit">Искать</button>
+      <a class="btn" href="/admin/blog/new">Новая запись</a>
+      <a class="btn" href="/admin">Назад</a>
+    </form>
+    <table>
+      <thead><tr><th>Название</th><th>Категория</th><th>Дата</th><th>Статус</th><th></th></tr></thead>
+      <tbody>
+        ${posts.map((p:any)=>`<tr>
+          <td>${escapeHtml(p.title)}</td>
+          <td>${escapeHtml(p.category||'')}</td>
+          <td>${escapeHtml(p.publish_date||'')}</td>
+          <td>${p.published? 'Опубликован':'Черновик'}</td>
+          <td><a class=\"btn\" href=\"/admin/blog/${encodeURIComponent(p.id)}\">Редактировать</a></td>
+        </tr>`).join('')}
+      </tbody>
+    </table>
+  `;
+  return c.html(layoutHtml('Админка — Блог', body));
+});
+
+app.get('/admin/blog/new', async (c) => {
+  if (!requireAuth(c)) return c.redirect('/admin/login');
+  const body = `
+    <h1>Новая запись</h1>
+    <form onsubmit="return savePost(event)">
+      <input name="title" placeholder="Заголовок" required />
+      <input name="category" placeholder="Категория" required />
+      <input name="publishDate" placeholder="YYYY-MM-DD" required />
+      <input name="readTime" type="number" placeholder="Время чтения (мин.)" required />
+      <textarea name="excerpt" placeholder="Короткий анонс" required></textarea>
+      <textarea name="content" placeholder="Контент" required></textarea>
+      <label class="muted"><input type="checkbox" name="published" /> Опубликовать</label>
+      <button class="btn" type="submit">Сохранить</button>
+      <a class="btn" href="/admin/blog">Отмена</a>
+    </form>
+    <script>
+      async function savePost(e){
+        e.preventDefault();
+        const fd=new FormData(e.target);
+        const payload={
+          title: fd.get('title'),
+          excerpt: fd.get('excerpt'),
+          content: fd.get('content'),
+          publishDate: fd.get('publishDate'),
+          readTime: Number(fd.get('readTime')),
+          relatedItems: [],
+          category: fd.get('category'),
+          published: fd.get('published')==='on'
+        };
+        const res=await fetch('/api/admin/blog',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});
+        const json=await res.json(); if(json.success){ location.href='/admin/blog'; } else { alert(json.error||'Save failed'); }
+      }
+    </script>
+  `;
+  return c.html(layoutHtml('Новая запись — Админка', body));
+});
+
+app.get('/admin/blog/:id', async (c) => {
+  if (!requireAuth(c)) return c.redirect('/admin/login');
+  const id = c.req.param('id');
+  const post = await c.env.DB.prepare('SELECT * FROM blog_posts WHERE id = ?').bind(id).first();
+  if (!post) return c.notFound();
+  const body = `
+    <h1>Редактировать: ${escapeHtml((post as any).title)}</h1>
+    <form onsubmit="return updatePost(event)">
+      <input name="title" value="${escapeHtml((post as any).title)}" required />
+      <input name="category" value="${escapeHtml((post as any).category||'')}" required />
+      <input name="publishDate" value="${escapeHtml((post as any).publish_date||'')}" required />
+      <input name="readTime" type="number" value="${(post as any).read_time||5}" required />
+      <textarea name="excerpt">${escapeHtml((post as any).excerpt||'')}</textarea>
+      <textarea name="content">${escapeHtml((post as any).content||'')}</textarea>
+      <label class="muted"><input type="checkbox" name="published" ${(post as any).published? 'checked':''} /> Опубликован</label>
+      <button class="btn" type="submit">Сохранить</button>
+      <a class="btn" href="/admin/blog">Назад</a>
+    </form>
+    <script>
+      async function updatePost(e){
+        e.preventDefault();
+        const fd=new FormData(e.target);
+        const payload={
+          title: fd.get('title'),
+          category: fd.get('category'),
+          publishDate: fd.get('publishDate'),
+          readTime: Number(fd.get('readTime')),
+          excerpt: fd.get('excerpt'),
+          content: fd.get('content'),
+          published: fd.get('published')==='on'
+        };
+        const res=await fetch('/api/admin/blog/${encodeURIComponent(id)}',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});
+        const json=await res.json(); if(json.success){ location.href='/admin/blog'; } else { alert(json.error||'Save failed'); }
+      }
+    </script>
+  `;
+  return c.html(layoutHtml('Редактирование поста — Админка', body));
 });
 
 // Serve photos from R2 storage
