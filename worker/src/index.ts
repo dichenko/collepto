@@ -41,34 +41,52 @@ function layoutHtml(title: string, body: string): string {
   <title>${escapeHtml(title)}</title>
   <link rel="icon" href="/favicon.svg" />
   <style>
-    body{font-family:system-ui,-apple-system,Segoe UI,Roboto,Ubuntu,Cantarell,Noto Sans,sans-serif;margin:0;color:#111}
-    .container{max-width:1000px;margin:0 auto;padding:16px}
-    .grid{display:grid;gap:12px;grid-template-columns:repeat(auto-fill,minmax(240px,1fr))}
-    .card{border:1px solid #e5e7eb;border-radius:8px;padding:12px;background:#fff}
-    .muted{color:#6b7280;font-size:12px}
-    a{color:#2563eb;text-decoration:none}
+    :root{--bg:#f6f7fb;--card:#fff;--muted:#6b7280;--text:#111827;--primary:#111827;--primary-2:#1f2937;--brand:#111827;--line:#e5e7eb;--chip:#111827;--chip-bg:#f1f5f9}
+    *{box-sizing:border-box}
+    body{font-family:Inter,system-ui,-apple-system,Segoe UI,Roboto,Ubuntu,Cantarell,Noto Sans,sans-serif;margin:0;color:var(--text);background:var(--bg)}
+    .shell{background:#fff;border-bottom:1px solid var(--line)}
+    .topbar{max-width:1200px;margin:0 auto;display:flex;align-items:center;gap:16px;padding:12px 16px}
+    .brand{font-weight:700;color:var(--brand)}
+    .topnav{margin-left:auto;display:flex;gap:8px}
+    .navbtn{display:inline-flex;align-items:center;gap:8px;padding:8px 12px;border-radius:10px;border:1px solid var(--line);background:#fff;color:var(--text);text-decoration:none}
+    .navbtn.active{background:var(--text);color:#fff;border-color:var(--text)}
+    .container{max-width:1200px;margin:0 auto;padding:20px}
+    .grid{display:grid;gap:20px;grid-template-columns:repeat(auto-fill,minmax(260px,1fr))}
+    .card{border:1px solid var(--line);border-radius:14px;background:var(--card);overflow:hidden}
+    .card-body{padding:14px}
+    .muted{color:var(--muted);font-size:12px}
+    .title{font-weight:600;margin:6px 0}
+    a{color:#0f172a;text-decoration:none}
     a:hover{text-decoration:underline}
-    nav{display:flex;gap:12px;margin-bottom:16px}
-    img{max-width:100%;height:auto;border-radius:6px}
-    .btn{display:inline-block;background:#2563eb;color:#fff;border-radius:8px;padding:8px 12px;text-decoration:none}
-    .btn:hover{background:#1d4ed8}
-    form{display:grid;gap:8px}
-    input,select,textarea{padding:8px;border:1px solid #e5e7eb;border-radius:6px}
-    table{width:100%;border-collapse:collapse}
-    th,td{border-bottom:1px solid #e5e7eb;padding:8px;text-align:left}
+    img.thumb{width:100%;height:180px;object-fit:cover}
+    .btn{display:inline-block;background:var(--text);color:#fff;border-radius:10px;padding:8px 12px;text-decoration:none}
+    .btn:hover{background:var(--primary-2)}
+    .btn.ghost{background:#fff;color:var(--text);border:1px solid var(--line)}
+    form{display:grid;gap:10px}
+    input,select,textarea{padding:10px;border:1px solid var(--line);border-radius:10px;background:#fff}
+    textarea{min-height:120px}
+    .row{display:grid;gap:20px}
+    .row.two{grid-template-columns:1.3fr 1fr}
+    .panel{border:1px solid var(--line);border-radius:14px;background:#fff;padding:14px}
+    .panel h3{margin:0 0 10px 0}
+    table{width:100%;border-collapse:collapse;background:#fff;border:1px solid var(--line);border-radius:10px;overflow:hidden}
+    th,td{border-bottom:1px solid var(--line);padding:10px;text-align:left}
     .admin-nav{display:flex;gap:8px;margin:8px 0 16px}
+    .chip{display:inline-block;font-size:11px;padding:4px 8px;border-radius:999px;background:var(--chip-bg);color:var(--chip)}
   </style>
   <meta name="description" content="Коллекция и блог Collepto" />
 </head>
 <body>
-  <div class="container">
-    <nav>
-      <a href="/">Главная</a>
-      <a href="/items">Коллекция</a>
-      <a href="/blog">Блог</a>
-    </nav>
-    ${body}
+  <div class="shell">
+    <div class="topbar">
+      <div class="brand">Моя коллекция</div>
+      <div class="topnav">
+        <a class="navbtn" href="/items">Коллекция</a>
+        <a class="navbtn" href="/blog">Блог</a>
+      </div>
+    </div>
   </div>
+  <div class="container">${body}</div>
 </body>
 </html>`;
 }
@@ -351,27 +369,38 @@ app.get('/', async (c) => {
     const posts = blogRes.results || [];
 
     const body = `
-      <h1>Collepto</h1>
-      <p class="muted">Последние предметы и записи блога</p>
-      <h2>Последние предметы</h2>
+      <h1 style="margin:0 0 6px 0">Добро пожаловать в мою коллекцию</h1>
+      <p class="muted">Исследуйте уникальные винтажные предметы, собранные с любовью за годы коллекционирования</p>
+      <div style="height:12px"></div>
+      <h2 style="margin:0 0 10px 0">Последние предметы</h2>
       ${items.length === 0 ? '<p class="muted">Нет данных.</p>' : `
         <div class="grid">
           ${items.map((i: any) => `
             <div class="card">
-              <a href="/items/${encodeURIComponent(i.id)}"><strong>${escapeHtml(i.title)}</strong></a>
-              ${i.description ? `<div class="muted">${escapeHtml(i.description)}</div>` : ''}
-              <div class="muted">${escapeHtml(i.category || '')} · ${i.year ?? ''}</div>
+              ${(i.photos&&i.photos[0])?`<img class=\"thumb\" src=\"${i.photos[0]}\" alt=\"${escapeHtml(i.title)}\" loading=\"lazy\" />`:''}
+              <div class="card-body">
+                <div class="muted">${escapeHtml(i.category || '')}</div>
+                <div class="title">${escapeHtml(i.title)}</div>
+                <div class="muted">${i.year ?? ''}</div>
+                <div style="height:8px"></div>
+                <a class="btn ghost" href="/items/${encodeURIComponent(i.id)}">Подробнее</a>
+              </div>
             </div>`).join('')}
         </div>`}
 
-      <h2 style="margin-top:16px">Последние записи</h2>
+      <div style="height:18px"></div>
+      <h2 style="margin:0 0 10px 0">Последние записи</h2>
       ${posts.length === 0 ? '<p class="muted">Нет данных.</p>' : `
         <div class="grid">
           ${posts.map((p: any) => `
             <div class="card">
-              <a href="/blog/${encodeURIComponent(p.slug || p.id)}"><strong>${escapeHtml(p.title)}</strong></a>
-              <div class="muted">${escapeHtml(p.category || '')} · ${escapeHtml(p.publish_date || '')}</div>
-              ${p.excerpt ? `<div class="muted">${escapeHtml(p.excerpt)}</div>` : ''}
+              <div class="card-body">
+                <div class="muted">${escapeHtml(p.category || '')}</div>
+                <div class="title">${escapeHtml(p.title)}</div>
+                <div class="muted">${escapeHtml(p.publish_date || '')}</div>
+                <div style="height:8px"></div>
+                <a class="btn ghost" href="/blog/${encodeURIComponent(p.slug || p.id)}">Подробнее</a>
+              </div>
             </div>`).join('')}
         </div>`}
     `;
@@ -394,14 +423,21 @@ app.get('/items', async (c) => {
       tags: JSON.parse(it.tags || '[]')
     }));
     const body = `
-      <h1>Коллекция</h1>
+      <h1 style="margin:0 0 6px 0">Добро пожаловать в мою коллекцию</h1>
+      <p class="muted">Исследуйте уникальные винтажные предметы, собранные с любовью за годы коллекционирования</p>
+      <div style=\"height:12px\"></div>
       ${items.length === 0 ? '<p class="muted">Нет данных.</p>' : `
         <div class="grid">
           ${items.map((i: any) => `
             <div class="card">
-              <a href="/items/${encodeURIComponent(i.id)}"><strong>${escapeHtml(i.title)}</strong></a>
-              ${i.description ? `<div class="muted">${escapeHtml(i.description)}</div>` : ''}
-              <div class="muted">${escapeHtml(i.category || '')} · ${i.year ?? ''}</div>
+              ${(i.photos&&i.photos[0])?`<img class=\"thumb\" src=\"${i.photos[0]}\" alt=\"${escapeHtml(i.title)}\" loading=\"lazy\" />`:''}
+              <div class="card-body">
+                <div class="muted">${escapeHtml(i.category || '')}</div>
+                <div class="title">${escapeHtml(i.title)}</div>
+                <div class="muted">${i.year ?? ''}</div>
+                <div style="height:8px"></div>
+                <a class="btn ghost" href="/items/${encodeURIComponent(i.id)}">Подробнее</a>
+              </div>
             </div>`).join('')}
         </div>`}
     `;
@@ -433,10 +469,14 @@ app.get('/items/:slug', async (c) => {
     const photos = photosRes.results?.map((p: any) => `/api/photos/r2/compressed/${p.compressed_path.split('/').pop()}`) || [];
 
     const body = `
-      <h1>${escapeHtml(item.title)}</h1>
-      ${item.description ? `<p>${escapeHtml(item.description)}</p>` : ''}
-      <div class="muted">${escapeHtml(item.category || '')} · ${item.year ?? ''}</div>
-      ${photos.length ? `<div class="grid" style="grid-template-columns:repeat(auto-fill,minmax(160px,1fr))">${photos.map((src: string) => `<a href="${src}" target="_blank" rel="noopener"><img src="${src}" alt="${escapeHtml(item.title)}" loading="lazy" /></a>`).join('')}</div>` : ''}
+      <div class="row two">
+        <div>
+          <h1 class="title" style="font-size:28px">${escapeHtml(item.title)}</h1>
+          ${item.description ? `<p class="muted">${escapeHtml(item.description)}</p>` : ''}
+          <div class="muted">${escapeHtml(item.category || '')} · ${item.year ?? ''}</div>
+        </div>
+        <div class="panel"><h3>Фотографии</h3>${photos.length ? `<div class="grid" style="grid-template-columns:repeat(auto-fill,minmax(160px,1fr))">${photos.map((src: string) => `<a href="${src}" target="_blank" rel="noopener"><img src="${src}" alt="${escapeHtml(item.title)}" loading="lazy" /></a>`).join('')}</div>` : '<div class="muted">Нет фото</div>'}</div>
+      </div>
     `;
     return c.html(layoutHtml(`${item.title} — Collepto`, body));
   } catch {
@@ -600,21 +640,40 @@ app.get('/admin/collection', async (c) => {
 app.get('/admin/collection/new', async (c) => {
   if (!requireAuth(c)) return c.redirect('/admin/login');
   const body = `
-    <h1>Новый предмет</h1>
+    <h1>Добавить новый предмет</h1>
     ${adminNavHtml()}
-    <form onsubmit="return saveItem(event)">
-      <input name="title" placeholder="Название" required />
-      <input name="category" placeholder="Категория" required />
-      <input name="year" type="number" placeholder="Год" required />
-      <textarea name="description" placeholder="Короткое описание"></textarea>
-      <input name="tags" placeholder="Теги, через запятую" />
-      <button class="btn" type="submit">Сохранить</button>
-      <a class="btn" href="/admin/collection">Отмена</a>
-    </form>
+    <div class="row two">
+      <div class="panel">
+        <h3>Основная информация</h3>
+        <form onsubmit="return saveItem(event)">
+          <select name="category" required>
+            <option value="">Выберите категорию</option>
+            <option>Vintage Cameras</option>
+            <option>Vinyl Records</option>
+            <option>Comic Books</option>
+            <option>Vintage Watches</option>
+            <option>Tech</option>
+            <option>Accessories</option>
+          </select>
+          <input name="title" placeholder="Название" required />
+          <input name="year" type="number" placeholder="Год" required />
+          <textarea name="description" placeholder="Короткое описание"></textarea>
+          <input name="tags" placeholder="Теги, через запятую" />
+          <div style="display:flex;gap:8px">
+            <a class="btn ghost" href="/admin/collection">Отмена</a>
+            <button class="btn" type="submit">Создать предмет</button>
+          </div>
+        </form>
+      </div>
+      <div class="panel">
+        <h3>Фотографии</h3>
+        <div class="muted">Загрузка фотографий будет добавлена позже</div>
+      </div>
+    </div>
     <script>
       async function saveItem(e){
         e.preventDefault();
-        const fd=new FormData(e.target);
+        const fd=new FormData(e.target.closest('form'));
         const payload={
           title: fd.get('title'),
           category: fd.get('category'),
