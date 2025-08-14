@@ -63,6 +63,7 @@ export interface PhotoAsset {
   height: number;
   alt?: string;
   caption?: string;
+  deleted?: boolean;
   orderIndex?: number;
   createdAt: string;
 }

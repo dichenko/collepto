@@ -11,23 +11,23 @@ export class DatabaseQueries {
       SELECT * FROM items ORDER BY created_at DESC
     `).all();
     
-    return result.results?.map(item => ({
+    return result.results?.map((item: any) => ({
       ...item,
-      tags: JSON.parse(item.tags || '[]'),
+      tags: JSON.parse(String(item.tags || '[]')),
       isFeatured: Boolean(item.is_featured)
     })) as CollectorItem[] || [];
   }
 
   async getItemById(id: string): Promise<CollectorItem | null> {
-    const item = await this.env.DB.prepare(`
+    const item: any = await this.env.DB.prepare(`
       SELECT * FROM items WHERE id = ?
     `).bind(id).first();
     
     if (!item) return null;
     
-    // Get photos
+    // Get photos (exclude soft-deleted)
     const photos = await this.env.DB.prepare(`
-      SELECT compressed_path, thumbnail_path FROM photo_assets WHERE item_id = ? ORDER BY order_index ASC, created_at ASC
+      SELECT compressed_path, thumbnail_path FROM photo_assets WHERE item_id = ? AND (deleted IS NULL OR deleted = 0) ORDER BY order_index ASC, created_at ASC
     `).bind(id).all();
     
     // Use R2ImageProcessor to get proper URLs
@@ -35,12 +35,9 @@ export class DatabaseQueries {
     
     return {
       ...item,
-      tags: JSON.parse(item.tags || '[]'),
+      tags: JSON.parse(String(item.tags || '[]')),
       isFeatured: Boolean(item.is_featured),
-      photos: photos.results?.map(p => {
-        // Use R2ImageProcessor to get proper public URL
-        return r2Processor.getPublicUrl(p.compressed_path);
-      }) || []
+      photos: (photos.results as any[])?.map((p: any) => r2Processor.getPublicUrl(String(p.compressed_path))) || []
     } as CollectorItem;
   }
 
@@ -132,7 +129,7 @@ export class DatabaseQueries {
       await this.setItemTags(id, item.tags);
     }
 
-    return result.changes > 0;
+    return (result as any).changes > 0;
   }
 
   async deleteItem(id: string): Promise<boolean> {
@@ -140,7 +137,7 @@ export class DatabaseQueries {
       DELETE FROM items WHERE id = ?
     `).bind(id).run();
     
-    return result.changes > 0;
+    return (result as any).changes > 0;
   }
 
   // Admin logs
@@ -184,15 +181,15 @@ export class DatabaseQueries {
       SELECT * FROM blog_posts ORDER BY publish_date DESC
     `).all();
     
-    return result.results?.map(post => ({
+    return result.results?.map((post: any) => ({
       ...post,
-      relatedItems: JSON.parse(post.related_items || '[]'),
+      relatedItems: JSON.parse(String(post.related_items || '[]')),
       published: Boolean(post.published)
     })) as BlogPost[] || [];
   }
 
   async getBlogPostById(id: string): Promise<BlogPost | null> {
-    const post = await this.env.DB.prepare(`
+    const post: any = await this.env.DB.prepare(`
       SELECT * FROM blog_posts WHERE id = ?
     `).bind(id).first();
     
@@ -200,7 +197,7 @@ export class DatabaseQueries {
     
     return {
       ...post,
-      relatedItems: JSON.parse(post.related_items || '[]'),
+      relatedItems: JSON.parse(String(post.related_items || '[]')),
       published: Boolean(post.published)
     } as BlogPost;
   }
@@ -254,7 +251,7 @@ export class DatabaseQueries {
       UPDATE blog_posts SET ${fields.join(', ')} WHERE id = ?
     `).bind(...values).run();
     
-    return result.changes > 0;
+    return (result as any).changes > 0;
   }
 
   async deleteBlogPost(id: string): Promise<boolean> {
@@ -262,19 +259,35 @@ export class DatabaseQueries {
       DELETE FROM blog_posts WHERE id = ?
     `).bind(id).run();
     
-    return result.changes > 0;
+    return (result as any).changes > 0;
   }
 
   // Photo assets queries
   async getPhotosByItemId(itemId: string): Promise<PhotoAsset[]> {
     const result = await this.env.DB.prepare(`
-      SELECT id, item_id, original_path, compressed_path, thumbnail_path, filename, size, width, height, alt, caption, order_index, created_at 
+      SELECT id, item_id, original_path, compressed_path, thumbnail_path, filename, size, width, height, alt, caption, deleted, order_index, created_at 
       FROM photo_assets 
-      WHERE item_id = ?
+      WHERE item_id = ? AND (deleted IS NULL OR deleted = 0)
       ORDER BY order_index ASC, created_at ASC
     `).bind(itemId).all();
     
-    return result.results as PhotoAsset[] || [];
+    const rows = (result.results || []) as any[];
+    return rows.map((r: any) => ({
+      id: r.id,
+      itemId: r.item_id,
+      originalPath: r.original_path,
+      compressedPath: r.compressed_path,
+      thumbnailPath: r.thumbnail_path,
+      filename: r.filename,
+      size: r.size,
+      width: r.width,
+      height: r.height,
+      alt: r.alt || undefined,
+      caption: r.caption || undefined,
+      deleted: Boolean(r.deleted),
+      orderIndex: r.order_index,
+      createdAt: r.created_at,
+    }));
   }
 
   async createPhotoAsset(photo: Omit<PhotoAsset, 'id' | 'createdAt'>): Promise<string> {
@@ -282,8 +295,8 @@ export class DatabaseQueries {
     const now = new Date().toISOString();
     
     await this.env.DB.prepare(`
-      INSERT INTO photo_assets (id, item_id, original_path, compressed_path, thumbnail_path, filename, size, width, height, alt, caption, order_index, created_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      INSERT INTO photo_assets (id, item_id, original_path, compressed_path, thumbnail_path, filename, size, width, height, alt, caption, deleted, order_index, created_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).bind(
       id, 
       photo.itemId, 
@@ -296,6 +309,7 @@ export class DatabaseQueries {
       photo.height || null,
       photo.alt || null,
       photo.caption || null,
+      photo.deleted ? 1 : 0,
       photo.orderIndex ?? 0,
       now
     ).run();
@@ -304,11 +318,57 @@ export class DatabaseQueries {
   }
 
     async getPhotoById(id: string): Promise<PhotoAsset | null> {
-    const result = await this.env.DB.prepare(`
-      SELECT id, item_id, original_path, compressed_path, thumbnail_path, filename, size, width, height, created_at FROM photo_assets WHERE id = ?
+    const row: any = await this.env.DB.prepare(`
+      SELECT id, item_id, original_path, compressed_path, thumbnail_path, filename, size, width, height, deleted, created_at FROM photo_assets WHERE id = ?
     `).bind(id).first();
     
-    return result as PhotoAsset || null;
+    if (!row) return null;
+    return {
+      id: row.id,
+      itemId: row.item_id,
+      originalPath: row.original_path,
+      compressedPath: row.compressed_path,
+      thumbnailPath: row.thumbnail_path,
+      filename: row.filename,
+      size: row.size,
+      width: row.width,
+      height: row.height,
+      deleted: Boolean(row.deleted),
+      createdAt: row.created_at,
+    } as PhotoAsset;
+  }
+
+  async softDeletePhotoAsset(id: string): Promise<boolean> {
+    const result = await this.env.DB.prepare(`
+      UPDATE photo_assets SET deleted = 1 WHERE id = ?
+    `).bind(id).run();
+    return (result as any).changes > 0;
+  }
+
+  async getPhotosByItemIdIncludingDeleted(itemId: string): Promise<PhotoAsset[]> {
+    const result = await this.env.DB.prepare(`
+      SELECT id, item_id, original_path, compressed_path, thumbnail_path, filename, size, width, height, alt, caption, deleted, order_index, created_at 
+      FROM photo_assets 
+      WHERE item_id = ?
+      ORDER BY order_index ASC, created_at ASC
+    `).bind(itemId).all();
+    const rows = (result.results || []) as any[];
+    return rows.map((r: any) => ({
+      id: r.id,
+      itemId: r.item_id,
+      originalPath: r.original_path,
+      compressedPath: r.compressed_path,
+      thumbnailPath: r.thumbnail_path,
+      filename: r.filename,
+      size: r.size,
+      width: r.width,
+      height: r.height,
+      alt: r.alt || undefined,
+      caption: r.caption || undefined,
+      deleted: Boolean(r.deleted),
+      orderIndex: r.order_index,
+      createdAt: r.created_at,
+    }));
   }
 
   async deletePhotoAsset(id: string): Promise<boolean> {
@@ -316,12 +376,12 @@ export class DatabaseQueries {
       DELETE FROM photo_assets WHERE id = ?
     `).bind(id).run();
 
-    return result.changes > 0;
+    return (result as any).changes > 0;
   }
 
   // Slug-based queries
   async getItemBySlug(slug: string): Promise<CollectorItem | null> {
-    const item = await this.env.DB.prepare(`
+    const item: any = await this.env.DB.prepare(`
       SELECT * FROM items WHERE slug = ?
     `).bind(slug).first();
     
@@ -329,7 +389,7 @@ export class DatabaseQueries {
     
     // Get photos
     const photos = await this.env.DB.prepare(`
-      SELECT compressed_path FROM photo_assets WHERE item_id = ? ORDER BY order_index ASC, created_at ASC
+      SELECT compressed_path FROM photo_assets WHERE item_id = ? AND (deleted IS NULL OR deleted = 0) ORDER BY order_index ASC, created_at ASC
     `).bind(item.id).all();
     
     // Transform field names from database format to interface format
@@ -346,14 +406,14 @@ export class DatabaseQueries {
       size: item.size,
       edition: item.edition,
       series: item.series,
-      tags: JSON.parse(item.tags || '[]'),
+      tags: JSON.parse(String(item.tags || '[]')),
       category: item.category,
       condition: item.condition,
       acquisition: item.acquisition,
       value: item.value,
       slug: item.slug,
       isFeatured: Boolean(item.is_featured),
-      photos: photos.results?.map(p => p.compressed_path) || [],
+      photos: (photos.results as any[])?.map((p: any) => p.compressed_path) || [],
       createdAt: item.created_at,
       updatedAt: item.updated_at
     } as CollectorItem;
@@ -368,13 +428,13 @@ export class DatabaseQueries {
     
     return {
       ...post,
-      relatedItems: JSON.parse(post.related_items || '[]'),
+      relatedItems: JSON.parse(String(post.related_items || '[]')),
       published: Boolean(post.published)
     } as BlogPost;
   }
 
   async findItemByIdPrefix(idPrefix: string): Promise<CollectorItem | null> {
-    const item = await this.env.DB.prepare(`
+    const item: any = await this.env.DB.prepare(`
       SELECT * FROM items WHERE id LIKE ?
     `).bind(`${idPrefix}%`).first();
     
@@ -382,7 +442,7 @@ export class DatabaseQueries {
     
     // Get photos
     const photos = await this.env.DB.prepare(`
-      SELECT compressed_path FROM photo_assets WHERE item_id = ? ORDER BY order_index ASC, created_at ASC
+      SELECT compressed_path FROM photo_assets WHERE item_id = ? AND (deleted IS NULL OR deleted = 0) ORDER BY order_index ASC, created_at ASC
     `).bind(item.id).all();
     
     // Transform field names from database format to interface format
@@ -399,14 +459,14 @@ export class DatabaseQueries {
       size: item.size,
       edition: item.edition,
       series: item.series,
-      tags: JSON.parse(item.tags || '[]'),
+      tags: JSON.parse(String(item.tags || '[]')),
       category: item.category,
       condition: item.condition,
       acquisition: item.acquisition,
       value: item.value,
       slug: item.slug,
       isFeatured: Boolean(item.is_featured),
-      photos: photos.results?.map(p => p.compressed_path) || [],
+      photos: (photos.results as any[])?.map((p: any) => p.compressed_path) || [],
       createdAt: item.created_at,
       updatedAt: item.updated_at
     } as CollectorItem;
@@ -421,7 +481,7 @@ export class DatabaseQueries {
     
     return {
       ...post,
-      relatedItems: JSON.parse(post.related_items || '[]'),
+      relatedItems: JSON.parse(String(post.related_items || '[]')),
       published: Boolean(post.published)
     } as BlogPost;
   }
@@ -455,7 +515,7 @@ export class DatabaseQueries {
       DELETE FROM sessions WHERE id = ?
     `).bind(id).run();
     
-    return result.changes > 0;
+    return (result as any).changes > 0;
   }
 
   async cleanExpiredSessions(): Promise<void> {

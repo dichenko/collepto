@@ -16,7 +16,7 @@ router.get('/', async (c) => {
     // Get all photos for all items
     const allPhotos = [];
     for (const item of items) {
-      const photos = await db.getPhotosByItemId(item.id);
+      const photos = await db.getPhotosByItemIdIncludingDeleted(item.id);
       allPhotos.push(...photos);
     }
 
@@ -155,8 +155,8 @@ async function generateItemsCsv(items: any[], db: DatabaseQueries): Promise<stri
   const rows = [headers];
   
   for (const item of items) {
-    // Get photos for this item
-    const photos = await db.getPhotosByItemId(item.id);
+    // Get photos for this item (including deleted for export)
+    const photos = await db.getPhotosByItemIdIncludingDeleted(item.id);
     const photoFiles = photos.map(p => p.filename).join('; ');
     
     const row = [

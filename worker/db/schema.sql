@@ -53,6 +53,7 @@ CREATE TABLE IF NOT EXISTS photo_assets (
     height INTEGER,
     alt TEXT,
     caption TEXT,
+    deleted BOOLEAN DEFAULT 0,
     order_index INTEGER DEFAULT 0,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (item_id) REFERENCES items(id) ON DELETE CASCADE
@@ -156,4 +157,5 @@ CREATE INDEX IF NOT EXISTS idx_blog_posts_published ON blog_posts(published);
 CREATE INDEX IF NOT EXISTS idx_blog_posts_slug ON blog_posts(slug);
 CREATE INDEX IF NOT EXISTS idx_photo_assets_item_id ON photo_assets(item_id);
 CREATE INDEX IF NOT EXISTS idx_photo_assets_order ON photo_assets(item_id, order_index);
+CREATE INDEX IF NOT EXISTS idx_photo_assets_deleted ON photo_assets(deleted);
 CREATE INDEX IF NOT EXISTS idx_sessions_expires_at ON sessions(expires_at);

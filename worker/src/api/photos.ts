@@ -46,10 +46,10 @@ router.get('/item/:itemId', async (c) => {
 
 // Validation function for image files
 function validateImageFile(file: File): { valid: boolean; error?: string } {
-  // Check file size (max 50MB)
-  const maxSize = 50 * 1024 * 1024;
+  // Check file size (max 25MB)
+  const maxSize = 25 * 1024 * 1024;
   if (file.size > maxSize) {
-    return { valid: false, error: 'File size too large (max 50MB)' };
+    return { valid: false, error: 'File size too large (max 25MB)' };
   }
 
   // Check file type
@@ -441,17 +441,16 @@ router.delete('/:photoId', async (c) => {
       return c.json({ success: false, error: 'Photo not found' }, 404);
     }
 
-    // Delete files from R2 storage
+    // Delete only processed variants from R2 storage (keep original for export)
     const r2Processor = new R2ImageProcessor(c.env.PHOTOS_BUCKET, c.env.R2_PUBLIC_URL);
     await r2Processor.deleteFiles({
-      original: photo.originalPath,
       compressed: photo.compressedPath,
       thumbnail: photo.thumbnailPath
     });
     
-    // Delete from database
-    await db.deletePhotoAsset(photoId);
-    await db.logAdminAction('delete', 'photo', photoId);
+    // Soft-delete in database
+    await db.softDeletePhotoAsset(photoId);
+    await db.logAdminAction('soft_delete', 'photo', photoId);
 
     return c.json({
       success: true,
