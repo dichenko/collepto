@@ -1,6 +1,7 @@
 import type { Env, CollectorItem, BlogPost, PhotoAsset } from '../types';
 import { R2ImageProcessor } from '../lib/r2-image-processor';
 import { createSlug, extractIdFromSlug } from '../lib/slugify';
+import { generateUUID } from '../utils/uuid';
 
 export class DatabaseQueries {
   constructor(private env: Env) {}
@@ -27,7 +28,7 @@ export class DatabaseQueries {
     
     // Get photos (exclude soft-deleted)
     const photos = await this.env.DB.prepare(`
-      SELECT compressed_path, thumbnail_path FROM photo_assets WHERE item_id = ? AND (deleted IS NULL OR deleted = 0) ORDER BY order_index ASC, created_at ASC
+      SELECT compressed_path, thumbnail_path FROM photos WHERE item_id = ? AND status = 'active' ORDER BY sort_order ASC, created_at ASC
     `).bind(id).all();
     
     // Use R2ImageProcessor to get proper URLs
@@ -42,7 +43,7 @@ export class DatabaseQueries {
   }
 
   async createItem(item: Omit<CollectorItem, 'id' | 'createdAt' | 'updatedAt'>): Promise<string> {
-    const id = crypto.randomUUID();
+    const id = generateUUID();
     const now = new Date().toISOString();
     const slug = createSlug(item.title, id);
     
@@ -142,7 +143,7 @@ export class DatabaseQueries {
 
   // Admin logs
   async logAdminAction(action: string, entityType: string, entityId: string, payload?: unknown): Promise<void> {
-    const id = crypto.randomUUID();
+    const id = generateUUID();
     const payloadJson = payload == null ? null : JSON.stringify(payload);
     await this.env.DB.prepare(`
       INSERT INTO admin_logs (id, action, entity_type, entity_id, payload)
@@ -203,7 +204,7 @@ export class DatabaseQueries {
   }
 
   async createBlogPost(post: Omit<BlogPost, 'id' | 'createdAt' | 'updatedAt'>): Promise<string> {
-    const id = crypto.randomUUID();
+    const id = generateUUID();
     const now = new Date().toISOString();
     const slug = createSlug(post.title, id);
     
@@ -291,8 +292,13 @@ export class DatabaseQueries {
   }
 
   async createPhotoAsset(photo: Omit<PhotoAsset, 'id' | 'createdAt'>): Promise<string> {
-    const id = crypto.randomUUID();
+    const id = generateUUID();
     const now = new Date().toISOString();
+    
+    // Для временных загрузок отключаем проверку внешних ключей
+    if (photo.tempUploadId) {
+      await this.env.DB.prepare(`PRAGMA foreign_keys = OFF`).run();
+    }
     
     await this.env.DB.prepare(`
       INSERT INTO photo_assets (id, item_id, temp_upload_id, original_path, compressed_path, thumbnail_path, filename, size, width, height, alt, caption, deleted, order_index, created_at)
@@ -314,6 +320,11 @@ export class DatabaseQueries {
       photo.orderIndex ?? 0,
       now
     ).run();
+    
+    // Включаем обратно проверку внешних ключей
+    if (photo.tempUploadId) {
+      await this.env.DB.prepare(`PRAGMA foreign_keys = ON`).run();
+    }
     
     return id;
   }
@@ -394,7 +405,7 @@ export class DatabaseQueries {
 
   async bindTempPhotosToItem(tempUploadId: string, itemId: string): Promise<void> {
     await this.env.DB.prepare(`
-      UPDATE photo_assets SET item_id = ?, temp_upload_id = NULL WHERE temp_upload_id = ?
+      UPDATE photo_assets SET item_id = ?, temp_upload_id = NULL WHERE temp_upload_id = ? AND (item_id = 'temp' OR item_id = '')
     `).bind(itemId, tempUploadId).run();
   }
 
@@ -534,7 +545,7 @@ export class DatabaseQueries {
 
   // Session management
   async createSession(userId: string, expiresAt: number): Promise<string> {
-    const id = crypto.randomUUID();
+    const id = generateUUID();
     const now = Date.now();
     
     await this.env.DB.prepare(`

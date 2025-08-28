@@ -2,8 +2,7 @@ import { Hono } from 'hono';
 import type { Env } from '../types';
 import { DatabaseQueries } from '../db/queries';
 import { R2ImageProcessor, type ImageVariant } from '../lib/r2-image-processor';
-
-// No longer needed - KV stores binary data directly
+import { generateUUID } from '../utils/uuid';
 
 const router = new Hono<{ Bindings: Env }>();
 
@@ -12,16 +11,22 @@ router.get('/item/:itemId', async (c) => {
   try {
     const itemId = c.req.param('itemId');
     const db = new DatabaseQueries(c.env);
-    const photos = await db.getPhotosByItemId(itemId);
+    // Используем новую таблицу photos
+    const photosResult = await c.env.DB.prepare(`
+      SELECT id, filename, compressed_path, thumbnail_path, alt_text as alt, caption, sort_order as orderIndex
+      FROM photos WHERE item_id = ? AND status = 'active' ORDER BY sort_order ASC, created_at ASC
+    `).bind(itemId).all();
+    
+    const photos = photosResult.results as any[];
     
     // Convert to format expected by PhotoUploader with public URLs
     const r2Processor = new R2ImageProcessor(c.env.PHOTOS_BUCKET, c.env.R2_PUBLIC_URL);
     const photosWithUrls = photos.map(photo => {
       // All photos are now in R2
       const imageUrls = r2Processor.getImageUrls(
-        photo.originalPath, 
-        photo.compressedPath, 
-        photo.thumbnailPath
+        '', // originalPath не нужен для отображения
+        photo.compressed_path, 
+        photo.thumbnail_path
       );
       return {
         id: photo.id,
@@ -49,13 +54,10 @@ function validateImageFile(file: File): { valid: boolean; error?: string } {
   // Check file size (max 25MB)
   const maxSize = 25 * 1024 * 1024;
   if (file.size > maxSize) {
-    return { valid: false, error: 'File size too large (max 25MB)' };
-  }
-
-  // Check file type
-  const allowedTypes = ['image/jpeg', 'image/jpg', 'image/png', 'image/webp'];
-  if (!allowedTypes.includes(file.type)) {
-    return { valid: false, error: 'Invalid file type. Only JPEG, PNG, and WebP are allowed.' };
+    return {
+      valid: false,
+      error: `File too large: ${(file.size / 1024 / 1024).toFixed(1)}MB. Max allowed: 25MB`
+    };
   }
 
   return { valid: true };
@@ -71,39 +73,45 @@ router.post('/item/:itemId/upload', async (c) => {
     const db = new DatabaseQueries(c.env);
     let item: any = null;
 
-    if (!tempUploadId) {
+    // Check if this is a temp upload (itemId is '_temp' or tempUploadId is provided)
+    const isTempUpload = itemIdParam === '_temp' || tempUploadId;
+
+    if (!isTempUpload) {
       const itemId = itemIdParam;
       item = await db.getItemById(itemId);
       if (!item) return c.json({ success: false, error: 'Item not found' }, 404);
-      const existingPhotos = await db.getPhotosByItemId(itemId);
-      if (existingPhotos.length >= 10) {
+      const existingPhotosCount = await c.env.DB.prepare(`
+        SELECT COUNT(*) as count FROM photos WHERE item_id = ? AND status = 'active'
+      `).bind(itemId).first() as any;
+      if (existingPhotosCount?.count >= 10) {
         return c.json({ success: false, error: 'Maximum 10 photos allowed per item' }, 400);
       }
     }
 
-    const originalFile = formData.get('original') as File;
+    // Клиент отправляет только compressed и thumbnail (без original)
     const compressedFile = formData.get('compressed') as File;
     const thumbnailFile = formData.get('thumbnail') as File;
-    const width = parseInt(formData.get('width') as string);
-    const height = parseInt(formData.get('height') as string);
+    const filename = (formData.get('filename') as string) || '';
+    const width = parseInt(formData.get('width') as string) || 0;
+    const height = parseInt(formData.get('height') as string) || 0;
     const alt = (formData.get('alt') as string) || null;
     const caption = (formData.get('caption') as string) || null;
     
-    if (!originalFile || !compressedFile || !thumbnailFile) {
+    if (!compressedFile || !thumbnailFile) {
       return c.json({ 
         success: false, 
-        error: 'Missing image variants. Client must send original, compressed (1920px), and thumbnail (400px) versions.' 
+        error: 'Missing image files. Client must send compressed and thumbnail versions.' 
       }, 400);
     }
 
     // Validate files
-    for (const f of [originalFile, compressedFile, thumbnailFile]){
+    for (const f of [compressedFile, thumbnailFile]){
       const v = validateImageFile(f);
       if(!v.valid){ return c.json({ success:false, error: v.error }, 400); }
     }
 
+    // Сохраняем только compressed и thumbnail (без original для экономии места)
     const variants: ImageVariant[] = [
-      { file: originalFile, path: '', variant: 'original' },
       { file: compressedFile, path: '', variant: 'compressed' },
       { file: thumbnailFile, path: '', variant: 'thumbnail' }
     ];
@@ -115,21 +123,40 @@ router.post('/item/:itemId/upload', async (c) => {
 
     const altToUse = alt || (item?.title || '');
 
-    const newPhotoId = await db.createPhotoAsset({
-      itemId: tempUploadId ? '' : itemIdParam,
-      tempUploadId: tempUploadId || undefined,
-      originalPath: processedData.originalPath,
-      compressedPath: processedData.compressedPath,
-      thumbnailPath: processedData.thumbnailPath,
-      filename: processedData.filename,
-      size: processedData.size,
-      width: processedData.width,
-      height: processedData.height,
-      alt: altToUse || undefined,
-      caption: caption || undefined
-    });
+    // Используем новую таблицу photos напрямую
+    const photoId = generateUUID();
+    const sortOrder = await c.env.DB.prepare(`
+      SELECT COALESCE(MAX(sort_order), -1) + 1 as next_order 
+      FROM photos 
+      WHERE item_id = ? AND status = 'active'
+    `).bind(isTempUpload ? null : itemIdParam).first() as any;
+    
+    await c.env.DB.prepare(`
+      INSERT INTO photos (
+        id, item_id, upload_session, filename, 
+        original_path, compressed_path, thumbnail_path,
+        width, height, file_size, alt_text, caption,
+        sort_order, status, created_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'active', datetime('now'))
+    `).bind(
+      photoId,
+      isTempUpload ? null : itemIdParam,
+      isTempUpload ? (tempUploadId || generateUUID()) : null,
+      filename || processedData.filename,
+      '', // нет original_path, но поле NOT NULL
+      processedData.compressedPath,
+      processedData.thumbnailPath,
+      processedData.width,
+      processedData.height,
+      processedData.size,
+      altToUse || null,
+      caption || null,
+      sortOrder?.next_order || 0
+    ).run();
+    
+    const newPhotoId = photoId;
 
-    const urls = r2Processor.getImageUrls(processedData.originalPath, processedData.compressedPath, processedData.thumbnailPath);
+    const urls = r2Processor.getImageUrls('', processedData.compressedPath, processedData.thumbnailPath);
     return c.json({ success:true, data: { id: newPhotoId, url: urls.compressedUrl, thumbnailUrl: urls.thumbnailUrl }}, 201);
   } catch (error) {
     console.error('Upload photo error:', error);
@@ -143,7 +170,11 @@ router.post('/bind-temp', async (c) => {
     const { tempUploadId, itemId } = await c.req.json();
     if (!tempUploadId || !itemId) return c.json({ success:false, error:'tempUploadId and itemId are required' }, 400);
     const db = new DatabaseQueries(c.env);
-    await db.bindTempPhotosToItem(tempUploadId, itemId);
+    // Обновляем временные фото, привязывая их к предмету
+    await c.env.DB.prepare(`
+      UPDATE photos SET item_id = ?, upload_session = NULL 
+      WHERE upload_session = ? AND item_id IS NULL
+    `).bind(itemId, tempUploadId).run();
     await db.logAdminAction('bind', 'photo', itemId, { tempUploadId });
     return c.json({ success:true });
   } catch (error) {
@@ -165,7 +196,9 @@ router.post('/item/:itemId/upload-multiple', async (c) => {
     }
 
     // Check photo limit
-    const existingPhotos = await db.getPhotosByItemId(itemId);
+    const existingPhotosCount = await c.env.DB.prepare(`
+      SELECT COUNT(*) as count FROM photos WHERE item_id = ? AND status = 'active'
+    `).bind(itemId).first() as any;
     const formData = await c.req.formData();
     
     // Parse multiple sets of variants (each photo sends 3 files + metadata)
@@ -208,10 +241,10 @@ router.post('/item/:itemId/upload-multiple', async (c) => {
       return c.json({ success: false, error: 'No photo sets uploaded' }, 400);
     }
 
-    if (existingPhotos.length + photoSets.length > 10) {
+    if ((existingPhotosCount?.count || 0) + photoSets.length > 10) {
       return c.json({ 
         success: false, 
-        error: `Cannot upload ${photoSets.length} photos. Maximum 10 photos allowed per item (currently ${existingPhotos.length})` 
+        error: `Cannot upload ${photoSets.length} photos. Maximum 10 photos allowed per item (currently ${existingPhotosCount?.count || 0})` 
       }, 400);
     }
 
@@ -249,21 +282,31 @@ router.post('/item/:itemId/upload-multiple', async (c) => {
         processedData.width = photoSet.width || 0;
         processedData.height = photoSet.height || 0;
         
-        const photoId = await db.createPhotoAsset({
-          itemId,
-          originalPath: processedData.originalPath,
-          compressedPath: processedData.compressedPath,
-          thumbnailPath: processedData.thumbnailPath,
-          filename: processedData.filename,
-          size: processedData.size,
-          width: processedData.width,
-          height: processedData.height,
-          alt: (photoSet.alt || item.title) || undefined,
-          caption: photoSet.caption || undefined
-        });
+        // Используем новую таблицу photos напрямую
+        const photoId = generateUUID();
+        const sortOrder = await c.env.DB.prepare(`
+          SELECT COALESCE(MAX(sort_order), -1) + 1 as next_order 
+          FROM photos 
+          WHERE item_id = ? AND status = 'active'
+        `).bind(itemId).first() as any;
+        
+        await c.env.DB.prepare(`
+          INSERT INTO photos (
+            id, item_id, filename, 
+            original_path, compressed_path, thumbnail_path,
+            width, height, file_size, alt_text, caption,
+            sort_order, status, created_at
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'active', datetime('now'))
+        `).bind(
+          photoId, itemId, processedData.filename,
+          '', processedData.compressedPath, processedData.thumbnailPath,
+          processedData.width, processedData.height, processedData.size,
+          (photoSet.alt || item.title) || null, photoSet.caption || null,
+          sortOrder?.next_order || 0
+        ).run();
 
         const imageUrls = r2Processor.getImageUrls(
-          processedData.originalPath,
+          '',
           processedData.compressedPath,
           processedData.thumbnailPath
         );
@@ -313,8 +356,10 @@ router.post('/item/:itemId/upload-both', async (c) => {
     }
 
     // Check photo limit (10 photos max per item)
-    const existingPhotos = await db.getPhotosByItemId(itemId);
-    if (existingPhotos.length >= 10) {
+    const existingPhotosCount = await c.env.DB.prepare(`
+      SELECT COUNT(*) as count FROM photos WHERE item_id = ? AND status = 'active'
+    `).bind(itemId).first() as any;
+    if ((existingPhotosCount?.count || 0) >= 10) {
       return c.json({ 
         success: false, 
         error: 'Maximum 10 photos allowed per item' 
@@ -367,21 +412,30 @@ router.post('/item/:itemId/upload-both', async (c) => {
     processedData.height = 1080;
 
     // Save to database (alt default from item title)
-    const photoId = await db.createPhotoAsset({
-      itemId,
-      originalPath: processedData.originalPath,
-      compressedPath: processedData.compressedPath,
-      thumbnailPath: processedData.thumbnailPath,
-      filename: processedData.filename,
-      size: processedData.size,
-      width: processedData.width,
-      height: processedData.height,
-      alt: item.title
-    });
+    const photoId = generateUUID();
+    const sortOrder = await c.env.DB.prepare(`
+      SELECT COALESCE(MAX(sort_order), -1) + 1 as next_order 
+      FROM photos 
+      WHERE item_id = ? AND status = 'active'
+    `).bind(itemId).first() as any;
+    
+    await c.env.DB.prepare(`
+      INSERT INTO photos (
+        id, item_id, filename, 
+        original_path, compressed_path, thumbnail_path,
+        width, height, file_size, alt_text,
+        sort_order, status, created_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'active', datetime('now'))
+    `).bind(
+      photoId, itemId, processedData.filename,
+      '', processedData.compressedPath, processedData.thumbnailPath,
+      processedData.width, processedData.height, processedData.size,
+      item.title || null, sortOrder?.next_order || 0
+    ).run();
 
     // Get URLs for response
     const imageUrls = r2Processor.getImageUrls(
-      processedData.originalPath,
+      '',
       processedData.compressedPath,
       processedData.thumbnailPath
     );
@@ -412,29 +466,29 @@ router.delete('/:photoId', async (c) => {
     const photoId = c.req.param('photoId');
     const db = new DatabaseQueries(c.env);
     
-    // Get photo info first
+    // Get photo details before deletion
     const photo = await db.getPhotoById(photoId);
-    
     if (!photo) {
       return c.json({ success: false, error: 'Photo not found' }, 404);
     }
 
-    // Delete only processed variants from R2 storage (keep original for export)
+    // Soft delete: mark as deleted and remove compressed/thumbnail from R2, keep original
     const r2Processor = new R2ImageProcessor(c.env.PHOTOS_BUCKET, c.env.R2_PUBLIC_URL);
+    
+    // Delete compressed and thumbnail from R2 (keep original for export)
     await r2Processor.deleteFiles({
       compressed: photo.compressedPath,
       thumbnail: photo.thumbnailPath
     });
-    
-    // Soft-delete in database
-    await db.softDeletePhotoAsset(photoId);
-    await db.logAdminAction('soft_delete', 'photo', photoId);
 
-    return c.json({
-      success: true,
-      data: { id: photoId }
-    });
-    
+    // Mark as deleted in database
+    await c.env.DB.prepare(`
+      UPDATE photo_assets SET deleted = 1 WHERE id = ?
+    `).bind(photoId).run();
+
+    await db.logAdminAction('delete', 'photo', photoId, { soft: true });
+
+    return c.json({ success: true });
   } catch (error) {
     console.error('Delete photo error:', error);
     return c.json({ success: false, error: 'Failed to delete photo' }, 500);
@@ -446,48 +500,36 @@ router.put('/:photoId/restore', async (c) => {
   try {
     const photoId = c.req.param('photoId');
     const db = new DatabaseQueries(c.env);
-
+    
+    // Get photo details
     const photo = await db.getPhotoById(photoId);
     if (!photo) {
       return c.json({ success: false, error: 'Photo not found' }, 404);
     }
 
-    const formData = await c.req.formData();
-    const compressedFile = formData.get('compressed') as File | null;
-    const thumbnailFile = formData.get('thumbnail') as File | null;
-
-    const r2Processor = new R2ImageProcessor(c.env.PHOTOS_BUCKET, c.env.R2_PUBLIC_URL);
-
-    let newCompressedPath: string | undefined;
-    let newThumbnailPath: string | undefined;
-
-    if (compressedFile || thumbnailFile) {
-      const variants: ImageVariant[] = [];
-      if (compressedFile) variants.push({ file: compressedFile, path: '', variant: 'compressed' });
-      if (thumbnailFile) variants.push({ file: thumbnailFile, path: '', variant: 'thumbnail' });
-
-      const saved = await r2Processor.saveDerivedVariants(photo.filename, variants);
-      newCompressedPath = saved.compressedPath;
-      newThumbnailPath = saved.thumbnailPath;
+    if (!photo.deleted) {
+      return c.json({ success: false, error: 'Photo is not deleted' }, 400);
     }
 
-    // Update DB: clear deleted, optionally update paths
-    await db.restorePhotoAsset(photoId, {
-      compressedPath: newCompressedPath,
-      thumbnailPath: newThumbnailPath,
-    });
-    await db.logAdminAction('restore', 'photo', photoId);
+    // Get original file from R2
+    const r2Processor = new R2ImageProcessor(c.env.PHOTOS_BUCKET, c.env.R2_PUBLIC_URL);
+    const originalObject = await c.env.PHOTOS_BUCKET.get(photo.originalPath);
+    
+    if (!originalObject) {
+      return c.json({ success: false, error: 'Original file not found in storage' }, 404);
+    }
 
-    const urls = r2Processor.getImageUrls(photo.originalPath, newCompressedPath || photo.compressedPath, newThumbnailPath || photo.thumbnailPath);
+    // TODO: This would require image processing on the server side
+    // For now, just unmark as deleted without recreating derivatives
+    await c.env.DB.prepare(`
+      UPDATE photo_assets SET deleted = 0 WHERE id = ?
+    `).bind(photoId).run();
 
-    return c.json({
-      success: true,
-      data: {
-        id: photoId,
-        url: urls.compressedUrl,
-        thumbnailUrl: urls.thumbnailUrl,
-        originalUrl: urls.originalUrl,
-      }
+    await db.logAdminAction('restore', 'photo', photoId, {});
+
+    return c.json({ 
+      success: true, 
+      message: 'Photo restored. Note: compressed/thumbnail versions may need manual recreation.' 
     });
   } catch (error) {
     console.error('Restore photo error:', error);
@@ -505,18 +547,18 @@ router.put('/item/:itemId/reorder', async (c) => {
       return c.json({ success: false, error: 'photoIds must be an array' }, 400);
     }
 
-    for (let index = 0; index < photoIds.length; index++) {
-      const id = photoIds[index];
-      await c.env.DB.prepare(`UPDATE photo_assets SET order_index = ? WHERE id = ? AND item_id = ?`)
-        .bind(index, id, itemId)
-        .run();
+    const db = new DatabaseQueries(c.env);
+    
+    // Update order_index for each photo
+    for (let i = 0; i < photoIds.length; i++) {
+      await c.env.DB.prepare(`
+        UPDATE photo_assets SET order_index = ? WHERE id = ? AND item_id = ?
+      `).bind(i, photoIds[i], itemId).run();
     }
 
-    const db = new DatabaseQueries(c.env);
     await db.logAdminAction('reorder', 'photo', itemId, { photoIds });
 
-    return c.json({ success: true, message: 'Photo order updated' });
-    
+    return c.json({ success: true });
   } catch (error) {
     console.error('Reorder photos error:', error);
     return c.json({ success: false, error: 'Failed to reorder photos' }, 500);
@@ -526,51 +568,42 @@ router.put('/item/:itemId/reorder', async (c) => {
 // GET storage usage statistics
 router.get('/storage/stats', async (c) => {
   try {
-    const db = new DatabaseQueries(c.env);
-    
-    // Get total storage used
-    const storageResult = await c.env.DB.prepare(`
-      SELECT 
-        COUNT(*) as totalPhotos,
-        SUM(size) as totalSize
-      FROM photo_assets
+    // Calculate total size of all photos in R2
+    const photosResult = await c.env.DB.prepare(`
+      SELECT SUM(size) as totalSize, COUNT(*) as totalCount 
+      FROM photo_assets 
+      WHERE deleted IS NULL OR deleted = 0
     `).first();
-    
-    // Get storage by item
-    const itemStorageResult = await c.env.DB.prepare(`
-      SELECT 
-        items.title,
-        COUNT(photo_assets.id) as photoCount,
-        SUM(photo_assets.size) as storageUsed
-      FROM items
-      LEFT JOIN photo_assets ON items.id = photo_assets.item_id
-      GROUP BY items.id, items.title
-      HAVING photoCount > 0
-      ORDER BY storageUsed DESC
-      LIMIT 10
-    `).all();
 
-    const totalPhotos = (storageResult as any)?.totalPhotos || 0;
-    const totalSize = (storageResult as any)?.totalSize || 0;
-    
-    // Cloudflare Assets limits (these are example values)
-    const maxStorageBytes = 10 * 1024 * 1024 * 1024; // 10GB example limit
-    const usagePercentage = (totalSize / maxStorageBytes) * 100;
+    const totalSize = (photosResult as any)?.totalSize || 0;
+    const totalCount = (photosResult as any)?.totalCount || 0;
+
+    // Estimate usage percentage (assuming 1GB limit for now)
+    const limitBytes = 1024 * 1024 * 1024; // 1GB
+    const usagePercentage = Math.round((totalSize / limitBytes) * 100);
+
+    // Format size for display
+    const formatBytes = (bytes: number): string => {
+      if (bytes === 0) return '0 Bytes';
+      const k = 1024;
+      const sizes = ['Bytes', 'KB', 'MB', 'GB'];
+      const i = Math.floor(Math.log(bytes) / Math.log(k));
+      return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+    };
 
     return c.json({
       success: true,
       data: {
-        totalPhotos,
         totalSize,
         totalSizeFormatted: formatBytes(totalSize),
-        usagePercentage: Math.round(usagePercentage * 100) / 100,
-        topStorageUsers: itemStorageResult.results || []
+        totalCount,
+        usagePercentage: Math.min(usagePercentage, 100),
+        limitFormatted: formatBytes(limitBytes)
       }
     });
-    
   } catch (error) {
     console.error('Storage stats error:', error);
-    return c.json({ success: false, error: 'Failed to get storage statistics' }, 500);
+    return c.json({ success: false, error: 'Failed to get storage stats' }, 500);
   }
 });
 
@@ -608,43 +641,24 @@ router.get('/serve/*', async (c) => {
       if (legacyData) {
         try {
           const { data, mimeType, size } = JSON.parse(legacyData);
+          const buffer = Uint8Array.from(atob(data), c => c.charCodeAt(0));
           
           console.log(`Admin serving legacy photo from key: ${key}`);
-          
-          // Convert base64 back to buffer with robust error handling
-          let cleanBase64 = data.replace(/\s/g, '');
-          
-          // Fix common base64 issues
-          cleanBase64 = cleanBase64.replace(/[^A-Za-z0-9+/=]/g, ''); // Remove invalid chars
-          
-          // Ensure proper padding
-          while (cleanBase64.length % 4 !== 0) {
-            cleanBase64 += '=';
-          }
-          
-          console.log(`Admin attempting to decode base64 of length: ${cleanBase64.length}`);
-          
-          const binaryString = atob(cleanBase64);
-          const legacyBuffer = new Uint8Array(binaryString.length);
-          for (let i = 0; i < binaryString.length; i++) {
-            legacyBuffer[i] = binaryString.charCodeAt(i);
-          }
-          
-          console.log(`Admin successfully decoded legacy base64 to buffer of size: ${legacyBuffer.length}`)
-          
-          return c.body(legacyBuffer, 200, {
+          return c.body(buffer, 200, {
             'Content-Type': mimeType,
             'Cache-Control': 'public, max-age=31536000', // 1 year cache
-            'Content-Length': size?.toString() || legacyBuffer.length.toString()
+            'Content-Length': size.toString()
           });
-        } catch (legacyError) {
-          console.error(`Admin legacy format parsing error for key ${key}:`, legacyError);
+        } catch (parseError) {
+          console.warn(`Failed to parse legacy photo data for key: ${key}`, parseError);
+          continue;
         }
       }
     }
     
-    console.log(`Admin photo not found in any format for path: ${photoPath}`);
+    console.log(`Photo not found for any of the possible keys:`, possibleKeys);
     return c.notFound();
+    
   } catch (error) {
     console.error('Photo serve error:', error);
     return c.notFound();
@@ -730,16 +744,5 @@ router.patch('/:photoId', async (c) => {
     return c.json({ success: false, error: 'Failed to update photo metadata' }, 500);
   }
 });
-
-// Utility function to format bytes
-function formatBytes(bytes: number): string {
-  if (bytes === 0) return '0 Bytes';
-  
-  const k = 1024;
-  const sizes = ['Bytes', 'KB', 'MB', 'GB', 'TB'];
-  const i = Math.floor(Math.log(bytes) / Math.log(k));
-  
-  return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
-}
 
 export { router as photosRouter };

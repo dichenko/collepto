@@ -5,10 +5,15 @@ import { SHELL_CSS, shell } from './styles';
 export function adminRoutes(app: App) {
 	function adminNavHtml(): string {
 		return `<div class="admin-nav">
-			<a class="btn" href="/admin">Админка</a>
-			<a class="btn" href="/admin/collection">Коллекция</a>
-			<a class="btn" href="/admin/blog">Блог</a>
-			<a class="btn" href="/admin/logout">Выйти</a>
+			<div class="nav-left">
+				<a class="btn secondary" href="/admin">Главная</a>
+				<a class="btn secondary" href="/admin/collection">Коллекция</a>
+				<a class="btn secondary" href="/admin/blog">Блог</a>
+			</div>
+			<div class="nav-right">
+				<a href="/" target="_blank" class="btn secondary small">Открыть сайт</a>
+				<a class="btn danger small" href="/admin/logout">Выйти</a>
+			</div>
 		</div>`;
 	}
 
@@ -54,12 +59,62 @@ export function adminRoutes(app: App) {
 		const usage = stats?.success ? stats.data.usagePercentage : 0;
 		const totalSize = stats?.success ? stats.data.totalSizeFormatted : 'n/a';
 		const body = `
-			<h1>Админка</h1>
+			<div class="card-header">
+				<h1 class="card-title">Панель управления</h1>
+				<p class="card-subtitle">Управление коллекцией и блогом</p>
+			</div>
+
 			${adminNavHtml()}
-			<div class="grid" style="grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));">
-				<div class="card"><div class="muted">Всего предметов</div><div style="font-size:28px;font-weight:700">${itemsCount}</div></div>
-				<div class="card"><div class="muted">Всего постов</div><div style="font-size:28px;font-weight:700">${blogCount}</div></div>
-				<div class="card"><div class="muted">Хранилище фото</div><div style="font-size:20px;font-weight:700">${usage}%</div><div class="muted">Использовано: ${escapeHtml(String(totalSize))}</div></div>
+
+			<div class="grid cols-2 mb-xl">
+				<a href="/admin/collection/new" class="card" style="text-decoration: none;">
+					<div class="card-body text-center">
+						<div style="font-size: 48px; margin-bottom: 16px;">📦</div>
+						<h3 class="card-title">Добавить предмет</h3>
+						<p class="card-subtitle">Создать новый предмет коллекции</p>
+						<div class="btn large mt-md">Создать предмет</div>
+					</div>
+				</a>
+				
+				<a href="/admin/blog/new" class="card" style="text-decoration: none;">
+					<div class="card-body text-center">
+						<div style="font-size: 48px; margin-bottom: 16px;">✍️</div>
+						<h3 class="card-title">Добавить пост</h3>
+						<p class="card-subtitle">Создать новую запись в блоге</p>
+						<div class="btn large mt-md">Создать пост</div>
+					</div>
+				</a>
+			</div>
+
+			<div class="grid cols-3 mb-xl">
+				<div class="card">
+					<div class="card-body text-center">
+						<div style="font-size: 36px; font-weight: 700; margin-bottom: 8px;">${itemsCount}</div>
+						<div class="text-muted">Всего предметов</div>
+						<a href="/admin/collection" class="btn secondary small mt-md">Управлять</a>
+					</div>
+				</div>
+				
+				<div class="card">
+					<div class="card-body text-center">
+						<div style="font-size: 36px; font-weight: 700; margin-bottom: 8px;">${blogCount}</div>
+						<div class="text-muted">Всего постов</div>
+						<a href="/admin/blog" class="btn secondary small mt-md">Управлять</a>
+					</div>
+				</div>
+				
+				<div class="card">
+					<div class="card-body text-center">
+						<div style="font-size: 36px; font-weight: 700; margin-bottom: 8px; color: ${usage > 80 ? 'var(--admin-danger)' : 'var(--admin-text)'};">${usage}%</div>
+						<div class="text-muted">Хранилище фото</div>
+						<div class="text-muted" style="font-size: 12px;">${escapeHtml(String(totalSize))}</div>
+					</div>
+				</div>
+			</div>
+
+			<div class="grid cols-2">
+				<a href="/admin/collection" class="btn large">Управление коллекцией</a>
+				<a href="/admin/blog" class="btn secondary large">Управление блогом</a>
 			</div>
 		`;
 		return c.html(`<style>${SHELL_CSS}</style>${shell(body)}`);
@@ -84,28 +139,103 @@ export function adminRoutes(app: App) {
 		sql += ' ORDER BY created_at DESC LIMIT 100';
 		const res = await c.env.DB.prepare(sql).bind(...params).all();
 		const items = (res.results||[]).map((it:any)=>({ ...it, tags: JSON.parse(it.tags||'[]') }));
-		const body = `
-		  <h1>Коллекция</h1>
+
+		// Получаем фотографии для каждого предмета
+		const itemsWithPhotos = await Promise.all(items.map(async (item: any) => {
+			const photosRes = await c.env.DB.prepare(`
+			  SELECT thumbnail_path FROM photos WHERE item_id = ? AND status = 'active' ORDER BY sort_order ASC, created_at ASC LIMIT 1
+			`).bind(item.id).all();
+			
+			const photos = photosRes.results || [];
+			const thumbnailPhoto = photos.length > 0 ? photos[0] : null;
+			const thumbnailUrl = thumbnailPhoto ? `/api/photos/r2/thumbnail/${(thumbnailPhoto as any).thumbnail_path.split('/').pop()}` : null;
+			
+			return { ...item, thumbnailUrl };
+		}));
+
+				const body = `
+		  <div class="card-header">
+			<div style="display: flex; justify-content: space-between; align-items: center;">
+			  <div>
+				<h1 class="card-title">Управление коллекцией</h1>
+				<p class="card-subtitle">Всего предметов: ${itemsWithPhotos.length}</p>
+			  </div>
+			  <a class="btn large" href="/admin/collection/new">+ Добавить предмет</a>
+			</div>
+		  </div>
+
 		  ${adminNavHtml()}
-		  <form method="get">
-			<input name="q" value="${escapeHtml(q)}" placeholder="Поиск" />
-			<input name="category" value="${escapeHtml(category)}" placeholder="Категория" />
-			<input name="yearFrom" value="${escapeHtml(yearFrom||'')}" placeholder="Год от" />
-			<input name="yearTo" value="${escapeHtml(yearTo||'')}" placeholder="Год до" />
-			<button class="btn" type="submit">Искать</button>
-			<a class="btn" href="/admin/collection/new">Добавить в коллекцию</a>
-		  </form>
-		  <table>
-			<thead><tr><th>Название</th><th>Категория</th><th>Год</th><th></th></tr></thead>
-			<tbody>
-			  ${items.map((i:any)=>`<tr>
-				<td>${escapeHtml(i.title)}</td>
-				<td>${escapeHtml(i.category||'')}</td>
-				<td>${i.year??''}</td>
-				<td><a class="btn" href="/admin/collection/${encodeURIComponent(i.id)}">Редактировать</a></td>
-			  </tr>`).join('')}
-			</tbody>
-		  </table>
+		  
+		  <div class="card mb-lg">
+			<div class="card-header">
+			  <h3 class="card-title">Поиск и фильтры</h3>
+			</div>
+			<div class="card-body">
+			  <form method="get" class="search-form">
+				<div class="form-group">
+				  <label class="form-label">Поиск</label>
+				  <input name="q" value="${escapeHtml(q)}" placeholder="Название или описание..." class="form-input" />
+				</div>
+				<div class="form-group">
+				  <label class="form-label">Категория</label>
+				  <input name="category" value="${escapeHtml(category)}" placeholder="Категория" class="form-input" />
+				</div>
+				<div class="form-group">
+				  <label class="form-label">Год от</label>
+				  <input name="yearFrom" type="number" value="${escapeHtml(yearFrom||'')}" placeholder="1900" class="form-input" />
+				</div>
+				<div class="form-group">
+				  <label class="form-label">Год до</label>
+				  <input name="yearTo" type="number" value="${escapeHtml(yearTo||'')}" placeholder="2024" class="form-input" />
+				</div>
+				<div class="form-group" style="display: flex; gap: 8px;">
+				  <button class="btn" type="submit">Найти</button>
+				  <a class="btn secondary" href="/admin/collection">Сбросить</a>
+				</div>
+			  </form>
+			</div>
+		  </div>
+		  
+		  <div class="table-wrapper">
+			<table>
+			  <thead>
+				<tr>
+				  <th style="width: 80px;">Фото</th>
+				  <th>Название</th>
+				  <th>Категория</th>
+				  <th>Год</th>
+				  <th style="text-align: center;">Действия</th>
+				</tr>
+			  </thead>
+			  <tbody>
+				${itemsWithPhotos.length === 0 ? `
+				  <tr>
+					<td colspan="5" class="text-center" style="padding: 48px;">
+					  <div style="font-size: 48px; margin-bottom: 16px;">📦</div>
+					  <p class="mb-md">Предметов пока нет</p>
+					  <a class="btn" href="/admin/collection/new">Добавить первый предмет</a>
+					</td>
+				  </tr>
+				` : itemsWithPhotos.map((i:any)=>`
+				  <tr>
+					<td>
+					  ${i.thumbnailUrl ? `
+						<img src="${i.thumbnailUrl}" alt="${escapeHtml(i.title)}" style="width: 60px; height: 60px; object-fit: cover; border-radius: 6px; border: 1px solid var(--admin-border);" />
+					  ` : `
+						<div style="width: 60px; height: 60px; background: var(--admin-bg); border: 1px solid var(--admin-border); border-radius: 6px; display: flex; align-items: center; justify-content: center; color: var(--admin-text-muted); font-size: 24px;">📷</div>
+					  `}
+					</td>
+					<td><strong>${escapeHtml(i.title)}</strong></td>
+					<td class="text-muted">${escapeHtml(i.category||'—')}</td>
+					<td class="text-muted">${i.year??'—'}</td>
+					<td class="text-center">
+					  <a class="btn secondary small" href="/admin/collection/${encodeURIComponent(i.id)}">Редактировать</a>
+					</td>
+				  </tr>
+				`).join('')}
+			  </tbody>
+			</table>
+		  </div>
 		`;
 		return c.html(`<style>${SHELL_CSS}</style>${shell(body)}`);
 	});
@@ -114,46 +244,142 @@ export function adminRoutes(app: App) {
 	app.get('/admin/collection/new', async (c) => {
 		if (!requireAuth(c)) return c.redirect('/admin/login');
 		const body = `
-			<h1>Добавить новый предмет</h1>
-			${adminNavHtml()}
-			<div class="row two">
-				<div class="panel">
-					<h3>Основная информация</h3>
-					<form id="itemForm" onsubmit="return saveItem(event)">
-						<input name="category" id="category" placeholder="Категория" list="category-list" autocomplete="off" required />
-						<datalist id="category-list"></datalist>
-						<input name="organization" placeholder="Организация" />
-						<input name="title" id="titleInput" placeholder="Название" required />
-						<input name="description" placeholder="Краткое описание" />
-						<textarea name="fullDescription" placeholder="Подробное описание"></textarea>
-						<div class="row" style="grid-template-columns:1fr 1fr">
-							<input name="country" placeholder="Страна" />
-							<input name="size" placeholder="Размер" />
-						</div>
-						<div class="row" style="grid-template-columns:1fr 1fr 1fr">
-							<input name="edition" placeholder="Тираж/Издание" />
-							<input name="series" placeholder="Серия" />
-							<input name="condition" placeholder="Состояние" />
-						</div>
-						<input name="year" type="number" placeholder="Год" />
-						<input name="tags" placeholder="Теги, через запятую" />
-						<label class="muted"><input type="checkbox" name="isFeatured" /> Показать на главной</label>
-						<div style="display:flex;gap:8px">
-							<a class="btn ghost" href="/admin/collection">Отмена</a>
-							<button id="saveBtn" class="btn" type="submit" disabled>Создать предмет</button>
-						</div>
-					</form>
+			<div class="card-header">
+				<div style="display: flex; justify-content: space-between; align-items: center;">
+					<div>
+						<h1 class="card-title">Добавить новый предмет</h1>
+						<p class="card-subtitle">Создание нового предмета коллекции</p>
+					</div>
+					<a class="btn secondary" href="/admin/collection">← Назад к списку</a>
 				</div>
-				<div class="panel">
-					<h3>Фотографии</h3>
-					<div id="dropzone" style="border:2px dashed #ccc; padding:16px; text-align:center">Перетащите файлы сюда или <input id="fileInput" type="file" multiple accept="image/*" /></div>
-					<div class="muted" style="margin-top:8px">Оригинал ≤25 МБ. Будут созданы версии: 1920px JPG 80% и превью 400px.</div>
-					<div id="progress" class="muted" style="margin-top:8px"></div>
-					<div id="queueList" class="grid" style="grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:8px;margin-top:8px"></div>
+			</div>
+
+			${adminNavHtml()}
+
+			<div class="grid cols-2">
+				<!-- Основная информация -->
+				<div class="card">
+					<div class="card-header">
+						<h3 class="card-title">📝 Основная информация</h3>
+						<p class="card-subtitle">Заполните основные данные о предмете</p>
+					</div>
+					<div class="card-body">
+						<form id="itemForm" onsubmit="return saveItem(event)">
+							<div class="form-group">
+								<label class="form-label">Категория *</label>
+								<input name="category" id="category" placeholder="Введите категорию" list="category-list" autocomplete="off" required class="form-input" />
+								<datalist id="category-list"></datalist>
+							</div>
+							
+							<div class="form-group">
+								<label class="form-label">Организация</label>
+								<input name="organization" placeholder="Название организации" class="form-input" />
+							</div>
+							
+							<div class="form-group">
+								<label class="form-label">Название *</label>
+								<input name="title" id="titleInput" placeholder="Название предмета" required class="form-input" />
+							</div>
+							
+							<div class="form-group">
+								<label class="form-label">Краткое описание</label>
+								<input name="description" placeholder="Краткое описание в одну строку" class="form-input" />
+							</div>
+							
+							<div class="form-group">
+								<label class="form-label">Подробное описание</label>
+								<textarea name="fullDescription" placeholder="Детальное описание предмета, его истории, особенностей..." class="form-input" rows="4"></textarea>
+							</div>
+
+							<div class="grid cols-2">
+								<div class="form-group">
+									<label class="form-label">Страна</label>
+									<input name="country" placeholder="Страна происхождения" class="form-input" />
+								</div>
+								<div class="form-group">
+									<label class="form-label">Размер</label>
+									<input name="size" placeholder="Размеры предмета" class="form-input" />
+								</div>
+							</div>
+
+							<div class="grid cols-3">
+								<div class="form-group">
+									<label class="form-label">Тираж/Издание</label>
+									<input name="edition" placeholder="Тираж" class="form-input" />
+								</div>
+								<div class="form-group">
+									<label class="form-label">Серия</label>
+									<input name="series" placeholder="Серия" class="form-input" />
+								</div>
+								<div class="form-group">
+									<label class="form-label">Состояние</label>
+									<input name="condition" placeholder="Состояние" class="form-input" />
+								</div>
+							</div>
+
+							<div class="form-group">
+								<label class="form-label">Год</label>
+								<input name="year" type="number" placeholder="Год создания/выпуска" class="form-input" />
+							</div>
+							
+							<div class="form-group">
+								<label class="form-label">Теги</label>
+								<input name="tags" placeholder="Теги через запятую (например: винтаж, редкость, коллекционное)" class="form-input" />
+							</div>
+							
+							<div class="form-group">
+								<label style="display: flex; align-items: center; gap: 8px; cursor: pointer;">
+									<input type="checkbox" name="isFeatured" />
+									<span class="form-label" style="margin: 0;">Показать на главной странице</span>
+								</label>
+							</div>
+
+							<div style="display: flex; gap: 12px; margin-top: 24px;">
+								<a class="btn secondary" href="/admin/collection">Отмена</a>
+								<button id="saveBtn" class="btn" type="submit" disabled>Создать предмет</button>
+							</div>
+						</form>
+					</div>
+				</div>
+
+				<!-- Фотографии -->
+				<div class="card">
+					<div class="card-header">
+						<h3 class="card-title">📷 Фотографии</h3>
+						<p class="card-subtitle">Загрузите изображения предмета</p>
+					</div>
+					<div class="card-body">
+						<div id="dropzone" style="
+							border: 2px dashed var(--admin-border); 
+							border-radius: var(--admin-radius);
+							padding: 32px; 
+							text-align: center;
+							background: var(--admin-bg);
+							transition: all 0.2s ease;
+							cursor: pointer;
+						">
+							<div style="font-size: 48px; margin-bottom: 16px;">📁</div>
+							<p style="margin: 0 0 8px 0; font-weight: 500;">Перетащите файлы сюда</p>
+							<p class="text-muted" style="margin: 0 0 16px 0;">или</p>
+							<label class="btn secondary" style="cursor: pointer;">
+								Выбрать файлы
+								<input id="fileInput" type="file" multiple accept="image/*" style="display: none;" />
+							</label>
+						</div>
+						
+						<div class="text-muted mt-md" style="font-size: 13px; text-align: center;">
+							<strong>Требования:</strong> максимум 25 МБ на файл<br/>
+							Будут созданы версии: 1920px (JPG 80%) и превью 400px
+						</div>
+						
+						<div id="progress" class="text-muted mt-sm"></div>
+						
+						<div id="queueList" class="grid auto mt-md" style="grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));"></div>
+					</div>
 				</div>
 			</div>
 			<script>
-			const TEMP_ID = crypto.randomUUID();
+			const SESSION_ID = 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) { const r = Math.random() * 16 | 0; const v = c === 'x' ? r : (r & 0x3 | 0x8); return v.toString(16); });
 			let queue = [];
 			let uploading = 0;
 			const drop = document.getElementById('dropzone');
@@ -163,10 +389,27 @@ export function adminRoutes(app: App) {
 			const titleInput = document.getElementById('titleInput');
 			const queueList = document.getElementById('queueList');
 
-			;['dragenter','dragover'].forEach(ev=>drop.addEventListener(ev,(e)=>{e.preventDefault(); drop.style.background='#f8f8f8';}))
-			;['dragleave','drop'].forEach(ev=>drop.addEventListener(ev,(e)=>{e.preventDefault(); drop.style.background='';}))
-			drop.addEventListener('drop', (e)=>{ const files = Array.from(e.dataTransfer.files||[]).filter(f=>f.type.startsWith('image/')); addToQueue(files); });
+			;['dragenter','dragover'].forEach(ev=>drop.addEventListener(ev,(e)=>{
+				e.preventDefault(); 
+				drop.style.borderColor='var(--admin-primary)'; 
+				drop.style.backgroundColor='var(--admin-bg)';
+			}))
+			;['dragleave','drop'].forEach(ev=>drop.addEventListener(ev,(e)=>{
+				e.preventDefault(); 
+				drop.style.borderColor='var(--admin-border)'; 
+				drop.style.backgroundColor='var(--admin-bg)';
+			}))
+			drop.addEventListener('drop', (e)=>{ 
+				const files = Array.from(e.dataTransfer.files||[]).filter(f=>f.type.startsWith('image/')); 
+				addToQueue(files); 
+			});
 			input.addEventListener('change', ()=>{ const files = Array.from(input.files||[]); addToQueue(files); input.value=''; });
+			
+			// Клик по зоне загрузки для выбора файлов
+			drop.addEventListener('click', (e) => {
+				if (e.target === input) return; // Не срабатывать если кликнули прямо на input
+				input.click();
+			});
 
 			function addToQueue(files){ queue.push(...files); renderQueue(); startUploads(); }
 			function renderQueue(){
@@ -174,12 +417,24 @@ export function adminRoutes(app: App) {
 				queue.forEach((f,i)=>{
 					const el=document.createElement('div');
 					el.className='card';
-					el.innerHTML = `<div class=muted style="font-size:12px;word-break:break-all">${'${f.name}'} (${Math.round(f.size/1024)} KB)</div><div id="bar_${'${i}'}" style="height:6px;background:#eee;border-radius:4px;overflow:hidden"><div style="height:100%;width:0;background:#4caf50"></div></div>`;
+					el.style.padding = '12px';
+					el.innerHTML = \`
+						<div style="display: flex; align-items: center; gap: 8px; margin-bottom: 8px;">
+							<div style="font-size: 20px;">📷</div>
+							<div style="flex: 1; min-width: 0;">
+								<div style="font-weight: 500; font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">\${f.name}</div>
+								<div class="text-muted" style="font-size: 11px;">\${(f.size/1024/1024).toFixed(1)} МБ</div>
+							</div>
+						</div>
+						<div id="bar_\${i}" style="height:6px;background:var(--admin-border);border-radius:var(--admin-radius);overflow:hidden;">
+							<div style="height:100%;width:0;background:var(--admin-success);transition:width 0.3s ease;"></div>
+						</div>
+					\`;
 					queueList.appendChild(el);
 				});
 			}
 
-			function setProgress(i, pct){ const bar = document.querySelector(`#bar_${'${i}'} div`); if(bar) bar.style.width = pct+'%'; }
+			function setProgress(i, pct){ const bar = document.querySelector(\`#bar_\${i} div\`); if(bar) bar.style.width = pct+'%'; }
 			function updateUI(){ progress.textContent = uploading>0? ('Загрузка... файлов: '+uploading) : (queue.length? 'Ожидание загрузки' : ''); saveBtn.disabled = uploading>0; }
 
 			async function startUploads(){
@@ -188,16 +443,23 @@ export function adminRoutes(app: App) {
 					try{
 						const {compressed, thumbnail, width, height} = await processImage(file);
 						const fd = new FormData();
-						fd.append('tempUploadId', TEMP_ID);
+						fd.append('sessionId', SESSION_ID);
 						fd.append('original', file, file.name);
 						fd.append('compressed', compressed, replaceExt(file.name,'jpg'));
 						fd.append('thumbnail', thumbnail, replaceExt(file.name,'jpg'));
 						fd.append('width', String(width)); fd.append('height', String(height));
 						fd.append('alt', titleInput.value||'');
-						const res = await fetch('/api/admin/photos/item/_temp/upload',{ method:'POST', body: fd });
-						if(!res.ok){ throw new Error('upload failed'); }
+						const res = await fetch('/api/admin/photos/v2/upload',{ method:'POST', body: fd });
+						if(!res.ok){ 
+							const errorText = await res.text();
+							console.error('Upload failed:', res.status, errorText);
+							throw new Error('upload failed: ' + (res.status || 'unknown error')); 
+						}
 						setProgress(idx, 100);
-					}catch(e){ alert('Ошибка загрузки: '+(e.message||e)); }
+					}catch(e){ 
+						console.error('Upload error:', e);
+						alert('Ошибка загрузки: '+(e.message||e)); 
+					}
 					finally{ uploading--; updateUI(); }
 				}
 			}
@@ -256,7 +518,7 @@ export function adminRoutes(app: App) {
 				};
 				const res=await fetch('/api/admin/items',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});
 				const json=await res.json(); if(json.success){
-					await fetch('/api/admin/photos/bind-temp',{ method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ tempUploadId: TEMP_ID, itemId: json.data.id }) });
+					await fetch('/api/admin/photos/v2/attach-to-item',{ method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ sessionId: SESSION_ID, itemId: json.data.id }) });
 					location.href='/admin/collection';
 				} else { alert(json.error||'Save failed'); }
 			}
@@ -303,17 +565,49 @@ export function adminRoutes(app: App) {
 			</div>
 		  </div>
 		  <script>
+		  // Сохранение предмета - обновленная версия для новой формы
 		  async function updateItem(e){
 			e.preventDefault();
-			const fd=new FormData(e.target);
-			const payload={
-			  title: fd.get('title'),
-			  category: fd.get('category'),
-			  year: Number(fd.get('year')),
-			  description: fd.get('description')||''
+			
+			const formData = new FormData(e.target);
+			const payload = {
+			  title: formData.get('title'),
+			  category: formData.get('category'),
+			  organization: formData.get('organization') || '',
+			  description: formData.get('description') || '',
+			  fullDescription: formData.get('fullDescription') || '',
+			  country: formData.get('country') || '',
+			  size: formData.get('size') || '',
+			  edition: formData.get('edition') || '',
+			  series: formData.get('series') || '',
+			  condition: formData.get('condition') || '',
+			  value: formData.get('value') || '',
+			  acquisition: formData.get('acquisition') || '',
+			  year: formData.get('year') ? Number(formData.get('year')) : null,
+			  isFeatured: formData.get('isFeatured') === 'on',
+			  tags: String(formData.get('tags') || '').split(',').map(s => s.trim()).filter(Boolean)
 			};
-			const res=await fetch('/api/admin/items/${'${encodeURIComponent(id)}'}',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});
-			const json=await res.json(); if(json.success){ location.href='/admin/collection'; } else { alert(json.error||'Save failed'); }
+			
+			try{
+			  console.log('Updating item:', '${id}', payload);
+			  const res = await fetch('/api/admin/items/${encodeURIComponent(id)}', {
+				method: 'PUT',
+				headers: { 'Content-Type': 'application/json' },
+				body: JSON.stringify(payload)
+			  });
+			  
+			  const json = await res.json();
+			  if(json.success){
+				alert('Предмет успешно обновлен!');
+				location.href = '/admin/collection';
+			  } else {
+				alert('Ошибка сохранения: ' + (json.error || 'Unknown'));
+				console.error('Update error:', json);
+			  }
+			}catch(error){
+			  alert('Ошибка сохранения: ' + error.message);
+			  console.error('Update error:', error);
+			}
 		  }
 
 		  const ITEM_ID = ${JSON.stringify(String(id))};
@@ -332,22 +626,22 @@ export function adminRoutes(app: App) {
 			currentPhotos.forEach((p, idx) => {
 			  const el = document.createElement('div');
 			  el.className = 'card';
-			  el.innerHTML = `
+			  el.innerHTML = \`
 				<div style="display:flex; gap:8px; align-items:center">
-				  <img src="${'${p.thumbnailUrl||p.url}'}" alt="" style="width:80px;height:80px;object-fit:cover;border-radius:6px"/>
+				  <img src="\${p.thumbnailUrl||p.url}" alt="" style="width:80px;height:80px;object-fit:cover;border-radius:6px"/>
 				  <div style="flex:1">
-				    <input data-id="${'${p.id}'}" data-field="alt" placeholder="alt" value="${'${p.alt||""}'}" />
-				    <input data-id="${'${p.id}'}" data-field="caption" placeholder="caption" value="${'${p.caption||""}'}" />
-				    <div class="muted" style="font-size:12px;word-break:break-all">${'${p.filename||""}'}</div>
+				    <input data-id="\${p.id}" data-field="alt" placeholder="alt" value="\${p.alt||''}" />
+				    <input data-id="\${p.id}" data-field="caption" placeholder="caption" value="\${p.caption||''}" />
+				    <div class="muted" style="font-size:12px;word-break:break-all">\${p.filename||''}</div>
 				  </div>
 				</div>
 				<div style="display:flex; gap:6px; margin-top:8px">
-				  <button class="btn ghost" onclick="moveUp(${idx})">↑</button>
-				  <button class="btn ghost" onclick="moveDown(${idx})">↓</button>
-				  <button class="btn" onclick="saveMeta('${'${p.id}'}')">Сохранить</button>
-				  <button class="btn danger" onclick="removePhoto('${'${p.id}'}')">Удалить</button>
+				  <button class="btn ghost" onclick="moveUp(\${idx})">↑</button>
+				  <button class="btn ghost" onclick="moveDown(\${idx})">↓</button>
+				  <button class="btn" onclick="saveMeta('\${p.id}')">Сохранить</button>
+				  <button class="btn danger" onclick="removePhoto('\${p.id}')">Удалить</button>
 				</div>
-			  `;
+			  \`;
 			  root.appendChild(el);
 			});
 		  }
@@ -359,7 +653,7 @@ export function adminRoutes(app: App) {
 			alert('Порядок сохранён');
 		  }
 		  async function saveMeta(id){
-			const inputs = Array.from(document.querySelectorAll(`[data-id="${'${id}'}"]`));
+			const inputs = Array.from(document.querySelectorAll(\`[data-id="\${id}"]\`));
 			const alt = inputs.find(i=>i.getAttribute('data-field')==='alt')?.value||'';
 			const caption = inputs.find(i=>i.getAttribute('data-field')==='caption')?.value||'';
 			await fetch('/api/admin/photos/'+encodeURIComponent(id),{ method:'PATCH', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ alt, caption })});
@@ -376,31 +670,45 @@ export function adminRoutes(app: App) {
 		  const drop = document.getElementById('dropzone');
 		  const input = document.getElementById('fileInput');
 		  const statusEl = document.getElementById('uploadStatus');
-		  ;['dragenter','dragover'].forEach(ev=>drop.addEventListener(ev,(e)=>{e.preventDefault(); drop.style.background='#f8f8f8';}))
-		  ;['dragleave','drop'].forEach(ev=>drop.addEventListener(ev,(e)=>{e.preventDefault(); drop.style.background='';}))
+		  ['dragenter','dragover'].forEach(ev=>drop.addEventListener(ev,(e)=>{e.preventDefault(); drop.style.background='#f8f8f8';}));
+		  ['dragleave','drop'].forEach(ev=>drop.addEventListener(ev,(e)=>{e.preventDefault(); drop.style.background='';}));
 		  drop.addEventListener('drop', async (e)=>{ const files = Array.from(e.dataTransfer.files||[]).filter(f=>f.type.startsWith('image/')); queue.push(...files); statusEl.textContent = 'В очереди файлов: '+queue.length; });
 		  input.addEventListener('change', ()=>{ const files = Array.from(input.files||[]); queue.push(...files); input.value=''; statusEl.textContent = 'В очереди файлов: '+queue.length; });
 
 		  async function uploadQueued(){
 			if(queue.length===0){ alert('Нет файлов'); return; }
 			statusEl.textContent = 'Обработка изображений...';
-			const form = new FormData();
-			let idx=0;
-			for(const file of queue){
-			  const {compressed, thumbnail, width, height} = await processImage(file);
-			  form.append(`photo_${idx}_original`, file, file.name);
-			  form.append(`photo_${idx}_compressed`, compressed, replaceExt(file.name,'jpg'));
-			  form.append(`photo_${idx}_thumbnail`, thumbnail, replaceExt(file.name,'jpg'));
-			  form.append(`photo_${idx}_width`, String(width));
-			  form.append(`photo_${idx}_height`, String(height));
-			  form.append(`photo_${idx}_filename`, file.name);
-			  form.append(`photo_${idx}_alt`, ITEM_TITLE);
-			  idx++;
+			
+			// Загружаем файлы по одному через новый photos API
+			for(let i = 0; i < queue.length; i++){
+			  const file = queue[i];
+			  statusEl.textContent = \`Загрузка \${i+1}/\${queue.length}: \${file.name}\`;
+			  
+			  try {
+				const {compressed, thumbnail, width, height} = await processImage(file);
+				
+				const formData = new FormData();
+				formData.append('compressed', compressed);
+				formData.append('thumbnail', thumbnail);
+				formData.append('filename', file.name);
+				formData.append('width', String(width));
+				formData.append('height', String(height));
+				
+				const res = await fetch('/api/admin/photos/item/'+encodeURIComponent(ITEM_ID)+'/upload', {
+				  method: 'POST',
+				  body: formData
+				});
+				
+				const json = await res.json();
+				if(!json.success){
+				  throw new Error(json.error || 'Upload failed');
+				}
+			  } catch(error) {
+				console.error('Upload error:', error);
+				alert(\`Ошибка загрузки \${file.name}: \${error.message}\`);
+			  }
 			}
-			statusEl.textContent = 'Загрузка...';
-			const res = await fetch('/api/admin/photos/item/'+encodeURIComponent(ITEM_ID)+'/upload-multiple',{ method:'POST', body: form });
-			const j = await res.json();
-			if(!j.success){ alert('Загружено с ошибками'); }
+			
 			queue = [];
 			statusEl.textContent = 'Готово';
 			await loadPhotos();
@@ -458,28 +766,87 @@ export function adminRoutes(app: App) {
 		sql += ' ORDER BY publish_date DESC LIMIT 100';
 		const res = await c.env.DB.prepare(sql).bind(...params).all();
 		const posts = res.results||[];
-		const body = `
-		  <h1>Блог</h1>
+				const body = `
+		  <div class="card-header">
+			<div style="display: flex; justify-content: space-between; align-items: center;">
+			  <div>
+				<h1 class="card-title">Управление блогом</h1>
+				<p class="card-subtitle">Всего записей: ${posts.length}</p>
+			  </div>
+			  <a class="btn large" href="/admin/blog/new">+ Новая запись</a>
+			</div>
+		  </div>
+
 		  ${adminNavHtml()}
-		  <form method="get">
-			<input name="q" value="${escapeHtml(q)}" placeholder="Поиск" />
-			<input name="category" value="${escapeHtml(category)}" placeholder="Категория" />
-			<select name="published"><option value="">Любые</option><option ${'${published===\'true\'?\'selected\' : \'\'}'} value="true">Опубликованные</option><option ${'${published===\'false\'?\'selected\' : \'\'}'} value="false">Черновики</option></select>
-			<button class="btn" type="submit">Искать</button>
-			<a class="btn" href="/admin/blog/new">Новая запись</a>
-		  </form>
-		  <table>
-			<thead><tr><th>Название</th><th>Категория</th><th>Дата</th><th>Статус</th><th></th></tr></thead>
-			<tbody>
-			  ${posts.map((p:any)=>`<tr>
-				<td>${escapeHtml(p.title)}</td>
-				<td>${escapeHtml(p.category||'')}</td>
-				<td>${escapeHtml(p.publish_date||'')}</td>
-				<td>${p.published? 'Опубликован':'Черновик'}</td>
-				<td><a class=\"btn\" href=\"/admin/blog/${'${encodeURIComponent(p.id)}'}\">Редактировать</a></td>
-			  </tr>`).join('')}
-			</tbody>
-		  </table>
+		  
+		  <div class="card mb-lg">
+			<div class="card-header">
+			  <h3 class="card-title">Поиск и фильтры</h3>
+			</div>
+			<div class="card-body">
+			  <form method="get" class="search-form">
+				<div class="form-group">
+				  <label class="form-label">Поиск</label>
+				  <input name="q" value="${escapeHtml(q)}" placeholder="Заголовок или содержание..." class="form-input" />
+				</div>
+				<div class="form-group">
+				  <label class="form-label">Категория</label>
+				  <input name="category" value="${escapeHtml(category)}" placeholder="Категория" class="form-input" />
+				</div>
+				<div class="form-group">
+				  <label class="form-label">Статус</label>
+				  <select name="published" class="form-input">
+					<option value="">Любые</option>
+					<option ${published==='true'?'selected' : ''} value="true">Опубликованные</option>
+					<option ${published==='false'?'selected' : ''} value="false">Черновики</option>
+				  </select>
+				</div>
+				<div class="form-group" style="display: flex; gap: 8px;">
+				  <button class="btn" type="submit">Найти</button>
+				  <a class="btn secondary" href="/admin/blog">Сбросить</a>
+				</div>
+			  </form>
+			</div>
+		  </div>
+		  
+		  <div class="table-wrapper">
+			<table>
+			  <thead>
+				<tr>
+				  <th>Название</th>
+				  <th>Категория</th>
+				  <th>Дата</th>
+				  <th>Статус</th>
+				  <th style="text-align: center;">Действия</th>
+				</tr>
+			  </thead>
+			  <tbody>
+				${posts.length === 0 ? `
+				  <tr>
+					<td colspan="5" class="text-center" style="padding: 48px;">
+					  <div style="font-size: 48px; margin-bottom: 16px;">📝</div>
+					  <p class="mb-md">Записей пока нет</p>
+					  <a class="btn" href="/admin/blog/new">Создать первую запись</a>
+					</td>
+				  </tr>
+				` : posts.map((p:any)=>`
+				  <tr>
+					<td><strong>${escapeHtml(p.title)}</strong></td>
+					<td class="text-muted">${escapeHtml(p.category||'—')}</td>
+					<td class="text-muted">${escapeHtml(p.publish_date||'—')}</td>
+					<td>
+					  <span class="badge ${p.published ? 'success' : 'warning'}">
+						${p.published ? 'Опубликован' : 'Черновик'}
+					  </span>
+					</td>
+					<td class="text-center">
+					  <a class="btn secondary small" href="/admin/blog/${encodeURIComponent(p.id)}">Редактировать</a>
+					</td>
+				  </tr>
+				`).join('')}
+			  </tbody>
+			</table>
+		  </div>
 		`;
 		return c.html(`<style>${SHELL_CSS}</style>${shell(body)}`);
 	});
@@ -556,7 +923,7 @@ export function adminRoutes(app: App) {
 			  content: fd.get('content'),
 			  published: fd.get('published')==='on'
 			};
-			const res=await fetch('/api/admin/blog/${'${encodeURIComponent(id)}'}',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});
+			const res=await fetch('/api/admin/blog/'+encodeURIComponent('${id}'),{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});
 			const json=await res.json(); if(json.success){ location.href='/admin/blog'; } else { alert(json.error||'Save failed'); }
 		  }
 		  </script>

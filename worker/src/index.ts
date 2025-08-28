@@ -2,6 +2,7 @@ import { authMiddleware } from './middleware/auth';
 import { itemsRouter } from './api/items';
 import { blogRouter } from './api/blog';
 import { photosRouter } from './api/photos';
+import { photosV2Router } from './api/photos_v2';
 import { exportRouter } from './api/export';
 import { authRouter } from './api/auth';
 import { createApp } from './server/app';
@@ -53,7 +54,7 @@ app.get('/api/items', async (c) => {
   const itemsWithPhotos = await Promise.all(
     (items.results || []).map(async (item) => {
       const photos = await c.env.DB.prepare(`
-        SELECT compressed_path, thumbnail_path FROM photo_assets WHERE item_id = ? AND (deleted IS NULL OR deleted = 0) ORDER BY order_index ASC, created_at ASC LIMIT 3
+        SELECT compressed_path, thumbnail_path FROM photos WHERE item_id = ? AND status = 'active' ORDER BY sort_order ASC, created_at ASC LIMIT 3
       `).bind(item.id).all();
       
       // Convert file paths to public URLs - all photos are now in R2
@@ -88,7 +89,7 @@ app.get('/api/items/:id', async (c) => {
   
   // Get photos for this item (exclude soft-deleted)
   const photos = await c.env.DB.prepare(`
-    SELECT compressed_path, thumbnail_path FROM photo_assets WHERE item_id = ? AND (deleted IS NULL OR deleted = 0) ORDER BY order_index ASC, created_at ASC
+    SELECT compressed_path, thumbnail_path FROM photos WHERE item_id = ? AND status = 'active' ORDER BY sort_order ASC, created_at ASC
   `).bind(id).all();
   
   // Convert file paths to public URLs - all photos are now in R2
@@ -226,6 +227,7 @@ app.use('/api/admin/*', authMiddleware);
 app.route('/api/admin/items', itemsRouter);
 app.route('/api/admin/blog', blogRouter);
 app.route('/api/admin/photos', photosRouter);
+app.route('/api/admin/photos/v2', photosV2Router);
 app.route('/api/admin/export', exportRouter);
 
 // SSR routes moved to modules
